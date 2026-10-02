@@ -1,0 +1,128 @@
+//! Simulation time.
+//!
+//! The universe clock is `f64` seconds relative to the J2000.0 epoch. At the extreme of
+//! 10 billion years (3.2e17 s) the clock still resolves ~64 s, which is far finer than any
+//! system that runs at those scales needs. Orbits are evaluated analytically at the clock
+//! value; all stateful systems run on fixed periods through the [`crate::scheduler`].
+
+pub const SECONDS_PER_DAY: f64 = 86_400.0;
+/// Julian year.
+pub const SECONDS_PER_YEAR: f64 = 365.25 * SECONDS_PER_DAY;
+pub const SECONDS_PER_KYR: f64 = 1.0e3 * SECONDS_PER_YEAR;
+pub const SECONDS_PER_MYR: f64 = 1.0e6 * SECONDS_PER_YEAR;
+pub const SECONDS_PER_GYR: f64 = 1.0e9 * SECONDS_PER_YEAR;
+
+pub fn years(t: f64) -> f64 {
+    t / SECONDS_PER_YEAR
+}
+
+/// A selectable simulation speed (simulated seconds per real second).
+#[derive(Clone, Copy, Debug)]
+pub struct Speed {
+    pub label: &'static str,
+    pub rate: f64,
+}
+
+/// Speeds span from real time to geological time. Stateful systems are stepped on fixed
+/// periods, so the fastest speeds are limited by the per-frame CPU budget, not by
+/// accuracy: if the simulation can't keep up it falls behind rather than taking larger,
+/// less accurate steps (see `scheduler`).
+pub const SPEEDS: &[Speed] = &[
+    Speed { label: "Real time", rate: 1.0 },
+    Speed { label: "1 min/s", rate: 60.0 },
+    Speed { label: "1 hr/s", rate: 3_600.0 },
+    Speed { label: "1 day/s", rate: SECONDS_PER_DAY },
+    Speed { label: "1 month/s", rate: SECONDS_PER_YEAR / 12.0 },
+    Speed { label: "1 yr/s", rate: SECONDS_PER_YEAR },
+    Speed { label: "10 yr/s", rate: 10.0 * SECONDS_PER_YEAR },
+    Speed { label: "100 yr/s", rate: 100.0 * SECONDS_PER_YEAR },
+    Speed { label: "1 kyr/s", rate: SECONDS_PER_KYR },
+    Speed { label: "10 kyr/s", rate: 10.0 * SECONDS_PER_KYR },
+    Speed { label: "100 kyr/s", rate: 100.0 * SECONDS_PER_KYR },
+    Speed { label: "1 Myr/s", rate: SECONDS_PER_MYR },
+    Speed { label: "10 Myr/s", rate: 10.0 * SECONDS_PER_MYR },
+    Speed { label: "100 Myr/s", rate: 100.0 * SECONDS_PER_MYR },
+];
+
+/// Human-readable duration, choosing a sensible unit.
+pub fn format_duration(seconds: f64) -> String {
+    let s = seconds.abs();
+    let sign = if seconds < 0.0 { "-" } else { "" };
+    if s < 120.0 {
+        format!("{sign}{s:.0} s")
+    } else if s < 2.0 * 3600.0 {
+        format!("{sign}{:.1} min", s / 60.0)
+    } else if s < 2.0 * SECONDS_PER_DAY {
+        format!("{sign}{:.1} h", s / 3600.0)
+    } else if s < SECONDS_PER_YEAR {
+        format!("{sign}{:.1} d", s / SECONDS_PER_DAY)
+    } else if s < 1e4 * SECONDS_PER_YEAR {
+        format!("{sign}{:.1} yr", s / SECONDS_PER_YEAR)
+    } else if s < 1e6 * SECONDS_PER_YEAR {
+        format!("{sign}{:.1} kyr", s / SECONDS_PER_KYR)
+    } else if s < 1e9 * SECONDS_PER_YEAR {
+        format!("{sign}{:.2} Myr", s / SECONDS_PER_MYR)
+    } else {
+        format!("{sign}{:.2} Gyr", s / SECONDS_PER_GYR)
+    }
+}
+
+/// Group digits of a large number: 1234567 -> "1,234,567".
+pub fn group_digits(v: f64) -> String {
+    let neg = v < 0.0;
+    let s = format!("{:.0}", v.abs());
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    if neg {
+        format!("-{out}")
+    } else {
+        out
+    }
+}
+
+/// Calendar label. For the Sol scenario the Gregorian year is meaningful; elsewhere we
+/// show elapsed time since the universe was created.
+pub fn format_date(t: f64, start: f64, gregorian: bool) -> String {
+    if gregorian {
+        let year = 2000.0 + years(t);
+        if year >= 1.0 {
+            let y = year.floor();
+            let doy = ((year - y) * 365.25).floor() + 1.0;
+            format!("{} CE, day {:.0}", group_digits(y), doy)
+        } else {
+            format!("{} BCE", group_digits((1.0 - year).floor()))
+        }
+    } else {
+        format!("Year {}", group_digits(years(t - start).floor()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_units() {
+        assert_eq!(format_duration(30.0), "30 s");
+        assert!(format_duration(3.0 * SECONDS_PER_YEAR).ends_with("yr"));
+        assert!(format_duration(5.0 * SECONDS_PER_MYR).ends_with("Myr"));
+    }
+
+    #[test]
+    fn digit_grouping() {
+        assert_eq!(group_digits(1234567.0), "1,234,567");
+        assert_eq!(group_digits(999.0), "999");
+        assert_eq!(group_digits(-1000.0), "-1,000");
+    }
+
+    #[test]
+    fn gregorian_dates() {
+        assert!(format_date(0.0, 0.0, true).starts_with("2,000 CE"));
+        assert!(format_date(-200_000.0 * SECONDS_PER_YEAR, 0.0, true).ends_with("BCE"));
+    }
+}

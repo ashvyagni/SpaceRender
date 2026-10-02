@@ -1,0 +1,332 @@
+# The real Solar System. Orbital elements are J2000 (JPL approximate elements / IAU),
+# carried over from the original prototype. Planet a in AU, moon a in km.
+# Temperatures are observed mean surface (or 1-bar) values; the climate model is
+# calibrated against them (see planet::environment::calibrate_real_body).
+
+[star]
+name = "Sun"
+mass = 1.0
+age_gyr = 4.57
+metallicity = 0.0
+
+[[body]]
+name = "Mercury"
+kind = "Rocky"
+a_au = 0.38709927
+e = 0.20563593
+i = 7.005
+node = 48.33076593
+peri = 29.12703035
+m0 = 174.796
+mass = 3.30104e23
+radius = 2.4397e6
+rotation_h = 1407.6
+tilt = 0.034
+albedo = 0.088
+temperature = 440.0
+magnetic = 0.01
+geology = 0.05
+color = [0.62, 0.60, 0.57]
+
+[[body]]
+name = "Venus"
+kind = "Rocky"
+a_au = 0.72333566
+e = 0.00677672
+i = 3.39467605
+node = 76.67984255
+peri = 54.85229144
+m0 = 50.416
+mass = 4.86732e24
+radius = 6.0518e6
+rotation_h = -5832.5
+tilt = 177.36
+albedo = 0.76
+temperature = 737.0
+pressure = 92.0
+co2 = 0.965
+n2 = 0.035
+water = 0.00002
+magnetic = 0.0
+geology = 0.6
+color = [0.90, 0.80, 0.58]
+
+[[body]]
+name = "Earth"
+kind = "Rocky"
+a_au = 1.00000261
+e = 0.01671123
+i = 0.00005
+node = -11.26064
+peri = 114.20783
+m0 = 357.529
+mass = 5.97217e24
+radius = 6.371e6
+rotation_h = 23.9345
+tilt = 23.4393
+albedo = 0.306
+temperature = 288.0
+pressure = 1.01325
+n2 = 0.78
+o2 = 0.21
+co2 = 0.00028
+h2o = 0.01
+water = 1.0
+ocean = 0.71
+ice = 0.03
+magnetic = 1.0
+geology = 1.0
+color = [0.16, 0.36, 0.74]
+# The last glacial period ends ~11,700 years ago (start of the Holocene).
+glacial_until_years = -11700.0
+# Earth's endowment defines 1.0 for every resource.
+resources = { iron = 1.0, copper = 1.0, tin = 1.0, coal = 1.0, oil = 1.0, uranium = 1.0, rare_metals = 1.0 }
+
+[[body]]
+name = "Mars"
+kind = "Rocky"
+a_au = 1.52368055
+e = 0.09339410
+i = 1.84969142
+node = 49.55953891
+peri = 286.50254090
+m0 = 19.373
+mass = 6.41693e23
+radius = 3.3895e6
+rotation_h = 24.6229
+tilt = 25.1886
+albedo = 0.25
+temperature = 210.0
+pressure = 0.006
+co2 = 0.95
+n2 = 0.03
+water = 0.02
+ice = 0.03
+magnetic = 0.0
+geology = 0.05
+color = [0.80, 0.42, 0.22]
+
+[[body]]
+name = "Jupiter"
+kind = "GasGiant"
+a_au = 5.20288700
+e = 0.04838624
+i = 1.30439695
+node = 100.47390909
+peri = 273.86687493
+m0 = 20.020
+mass = 1.89813e27
+radius = 6.9911e7
+rotation_h = 9.925
+tilt = 3.1296
+albedo = 0.343
+temperature = 165.0
+pressure = 1000.0
+h2he = 0.997
+ch4 = 0.003
+magnetic = 20000.0
+color = [0.83, 0.72, 0.56]
+
+[[body]]
+name = "Saturn"
+kind = "GasGiant"
+a_au = 9.53667594
+e = 0.05386179
+i = 2.48599187
+node = 113.66242448
+peri = 339.39150664
+m0 = 317.020
+mass = 5.68319e26
+radius = 5.8232e7
+rotation_h = 10.656
+tilt = 26.728
+albedo = 0.342
+temperature = 134.0
+pressure = 1000.0
+h2he = 0.995
+ch4 = 0.005
+magnetic = 600.0
+color = [0.88, 0.80, 0.60]
+rings = { inner = 7.4e7, outer = 1.4e8, opacity = 0.85 }
+
+[[body]]
+name = "Uranus"
+kind = "IceGiant"
+a_au = 19.18916464
+e = 0.04725744
+i = 0.77263783
+node = 74.01692503
+peri = 96.99885784
+m0 = 142.238
+mass = 8.68103e25
+radius = 2.5362e7
+rotation_h = -17.24
+tilt = 97.77
+albedo = 0.30
+temperature = 76.0
+pressure = 1000.0
+h2he = 0.977
+ch4 = 0.023
+magnetic = 50.0
+color = [0.62, 0.82, 0.86]
+rings = { inner = 4.2e7, outer = 5.1e7, opacity = 0.12 }
+
+[[body]]
+name = "Neptune"
+kind = "IceGiant"
+a_au = 30.06992276
+e = 0.00859048
+i = 1.77004347
+node = 131.78422574
+peri = 276.33602408
+m0 = 256.228
+mass = 1.02410e26
+radius = 2.4622e7
+rotation_h = 16.11
+tilt = 28.32
+albedo = 0.29
+temperature = 72.0
+pressure = 1000.0
+h2he = 0.985
+ch4 = 0.015
+magnetic = 27.0
+color = [0.30, 0.48, 0.90]
+
+[[body]]
+name = "Moon"
+kind = "Rocky"
+parent = "Earth"
+a_km = 384399.0
+e = 0.0549
+i = 5.145
+node = 125.08
+peri = 318.15
+m0 = 135.27
+mass = 7.342e22
+radius = 1.7374e6
+tilt = 1.5424
+albedo = 0.11
+temperature = 250.0
+magnetic = 0.0
+geology = 0.01
+color = [0.60, 0.60, 0.60]
+
+[[body]]
+name = "Io"
+kind = "Rocky"
+parent = "Jupiter"
+a_km = 421700.0
+e = 0.0041
+i = 0.040
+node = 43.977
+peri = 84.129
+m0 = 180.232
+mass = 8.932e22
+radius = 1.8216e6
+albedo = 0.63
+temperature = 110.0
+geology = 30.0
+color = [0.88, 0.78, 0.32]
+
+[[body]]
+name = "Europa"
+kind = "Icy"
+parent = "Jupiter"
+a_km = 670900.0
+e = 0.0090
+i = 0.466
+node = 219.126
+peri = 260.684
+m0 = 12.437
+mass = 4.800e22
+radius = 1.5608e6
+albedo = 0.68
+temperature = 102.0
+water = 2.0
+ice = 1.0
+subsurface_ocean = true
+geology = 1.0
+color = [0.85, 0.80, 0.72]
+
+[[body]]
+name = "Ganymede"
+kind = "Icy"
+parent = "Jupiter"
+a_km = 1070400.0
+e = 0.0013
+i = 0.177
+node = 63.523
+peri = 192.452
+m0 = 310.157
+mass = 1.482e23
+radius = 2.6341e6
+albedo = 0.43
+temperature = 110.0
+water = 25.0
+ice = 1.0
+subsurface_ocean = true
+magnetic = 0.025
+geology = 0.1
+color = [0.70, 0.66, 0.58]
+
+[[body]]
+name = "Callisto"
+kind = "Icy"
+parent = "Jupiter"
+a_km = 1882700.0
+e = 0.0074
+i = 0.186
+node = 298.848
+peri = 52.643
+m0 = 182.414
+mass = 1.076e23
+radius = 2.4103e6
+albedo = 0.22
+temperature = 134.0
+water = 20.0
+ice = 1.0
+geology = 0.01
+color = [0.52, 0.48, 0.43]
+
+[[body]]
+name = "Titan"
+kind = "Icy"
+parent = "Saturn"
+a_km = 1221870.0
+e = 0.0288
+i = 0.330
+node = 28.060
+peri = 180.534
+m0 = 120.072
+mass = 1.3452e23
+radius = 2.5747e6
+albedo = 0.22
+temperature = 94.0
+pressure = 1.45
+n2 = 0.95
+ch4 = 0.05
+water = 20.0
+ice = 1.0
+subsurface_ocean = true
+geology = 0.2
+color = [0.80, 0.62, 0.32]
+
+[[body]]
+name = "Enceladus"
+kind = "Icy"
+parent = "Saturn"
+a_km = 237948.0
+e = 0.0047
+i = 0.009
+node = 28.768
+peri = 116.425
+m0 = 0.524
+mass = 1.08020e20
+radius = 2.521e5
+albedo = 0.81
+temperature = 75.0
+water = 0.01
+ice = 1.0
+subsurface_ocean = true
+geology = 0.5
+color = [0.93, 0.93, 0.92]

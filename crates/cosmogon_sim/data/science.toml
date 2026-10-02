@@ -1,0 +1,54 @@
+# Cosmogon scientific-model parameters.
+#
+# Every number here is a modelling assumption, not a known constant. Rates are expressed
+# per billion years (Gyr) unless noted. Where science is genuinely uncertain (most of the
+# life section) the defaults aim for *plausibility*, which means most universes contain
+# little or no intelligent life. Universe settings multiply these values.
+
+[life]
+# Sterile -> prebiotic chemistry, given liquid water and an energy source.
+prebiotic_rate = 20.0
+# Prebiotic chemistry -> self-replicating microbial life (abiogenesis). Deeply uncertain.
+abiogenesis_rate = 3.0
+# Evolution of oxygenic photosynthesis once microbial life exists.
+photosynthesis_rate = 1.0
+# Oxygen builds up after photosynthesis with this e-folding time (Myr), once sinks saturate.
+oxygenation_timescale_myr = 400.0
+oxygen_sink_delay_myr = 300.0
+# Microbial -> complex (eukaryote-like) cells. Scaled by available oxygen.
+eukaryogenesis_rate = 0.6
+# Complex cells -> multicellular organisms.
+multicellularity_rate = 1.2
+# Multicellular -> diverse complex ecosystems ("Cambrian explosion"). Needs O2 > 5%.
+complex_ecosystem_rate = 3.0
+# Complex ecosystems -> a tool-using, language-capable intelligent species.
+intelligence_rate = 0.5
+# Burial of organic carbon into future coal / oil (Earth-equivalents per Gyr at full biomass).
+coal_formation_rate = 2.5
+oil_formation_rate = 1.5
+
+[catastrophes]
+# Mass-extinction-class impacts / supervolcanism (per Gyr, scaled by local environment).
+mass_extinction_rate = 5.0
+# Fully sterilising events (per Gyr).
+sterilisation_rate = 0.02
+# Extra extinction pressure on planets around flare-active (mostly M-dwarf) stars.
+flare_extinction_factor = 4.0
+
+[civilization]
+# Intrinsic yearly growth rate before technology (hunter-gatherers ~0.0005-0.001).
+base_growth_rate = 0.0004
+# Research produced per year scales with population^research_exponent.
+research_exponent = 0.75
+research_scale = 0.0001
+# Without writing, accumulated knowledge erodes towards a cap (fraction lost per year;
+# 0.002 is a ~350-year half-life for what isn't actively taught).
+oral_knowledge_decay = 0.002
+# Baseline yearly probabilities, modulated by state (density, medicine, stability...).
+pandemic_rate = 0.003
+war_rate = 0.004
+disaster_rate = 0.01
+# Stability below this triggers a societal collapse.
+collapse_threshold = 0.12
+# Speed of light fraction for interstellar probes once the technology exists.
+probe_speed_c = 0.05

@@ -1,4 +1,6 @@
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 // ──────────────────────────────────────────────────────────────
@@ -6,7 +8,7 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssi
 // ──────────────────────────────────────────────────────────────
 
 /// A 3-component f64 vector.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Vec3d {
     pub x: f64,
     pub y: f64,

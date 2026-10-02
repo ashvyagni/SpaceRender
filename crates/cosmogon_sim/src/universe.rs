@@ -1,0 +1,730 @@
+//! The universe: owner of all simulation state and the single entry point for advancing it.
+
+use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
+
+use crate::astro::{generate, sol, Body, BodyKind, StarSystem, LIGHT_YEAR, SPEED_OF_LIGHT};
+use crate::civ::species::{Habitat, Species};
+use crate::civ::tech::TechGraph;
+use crate::civ::{environment_for, CivStatus, Civilization, WorldView};
+use crate::habitability::{assess, Habitability};
+use crate::history::{Category, Event, History};
+use crate::life::{Biosphere, LifeEvent, LifeMultipliers, Stage, STEP_SECONDS};
+use crate::params::ScienceParams;
+use crate::planet::environment::update_climate;
+use crate::planet::terrain::{self, SurfaceContext};
+use crate::rng::{domain, Rng};
+use crate::scheduler::Scheduler;
+use crate::time::{format_date, SECONDS_PER_GYR, SECONDS_PER_MYR, SECONDS_PER_YEAR};
+use crate::Vec3d;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BodyRef {
+    pub system: u32,
+    pub body: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Scenario {
+    /// A procedurally generated stellar neighbourhood. Anything — or nothing — may happen.
+    Neighbourhood,
+    /// As above, but the central system has an Earth-like world already rich in complex life.
+    GardenWorld,
+    /// The real Solar System, 200,000 years ago, with early humans on Earth.
+    Sol,
+}
+
+impl Scenario {
+    pub const ALL: [Scenario; 3] = [Scenario::Neighbourhood, Scenario::GardenWorld, Scenario::Sol];
+    pub fn label(self) -> &'static str {
+        match self {
+            Scenario::Neighbourhood => "Stellar neighbourhood",
+            Scenario::GardenWorld => "Garden world",
+            Scenario::Sol => "Sol — Dawn of Humanity",
+        }
+    }
+    pub fn description(self) -> &'static str {
+        match self {
+            Scenario::Neighbourhood => "A procedural neighbourhood of stars with realistic statistics. With realistic settings you may never see intelligent life.",
+            Scenario::GardenWorld => "The central star hosts an Earth-like world teeming with complex life. Watch whether intelligence emerges, and what it becomes.",
+            Scenario::Sol => "The real Solar System 200,000 years ago. Early humans have fire and stone tools; their history is not written yet. (Earth's surface is procedural for now.)",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct UniverseSettings {
+    pub seed: u64,
+    pub scenario: Scenario,
+    pub system_count: u32,
+    /// Multiplies every life-transition rate.
+    pub life_rate: f64,
+    /// Additionally multiplies the emergence of intelligence.
+    pub intelligence_rate: f64,
+    /// Multiplies research output and discovery rates.
+    pub tech_rate: f64,
+    pub resource_abundance: f64,
+}
+
+impl Default for UniverseSettings {
+    fn default() -> Self {
+        Self { seed: 1, scenario: Scenario::Neighbourhood, system_count: 24, life_rate: 1.0, intelligence_rate: 1.0, tech_rate: 1.0, resource_abundance: 1.0 }
+    }
+}
+
+/// Named presets for the life multipliers.
+pub const LIFE_PRESETS: &[(&str, f64, f64, &str)] = &[
+    ("Realistic", 1.0, 1.0, "Best-guess rates. Intelligent life is rare; most universes stay quiet."),
+    ("Hopeful", 4.0, 6.0, "Life arises readily and intelligence is less of a fluke."),
+    ("Teeming", 15.0, 40.0, "Life everywhere it can exist. Good for watching many civilizations."),
+];
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Probe {
+    pub civ: u32,
+    pub from: u32,
+    pub to: u32,
+    pub launched: f64,
+    /// m/s
+    pub speed: f64,
+    pub arrived: bool,
+}
+
+impl Probe {
+    pub fn position(&self, systems: &[StarSystem], t: f64) -> Vec3d {
+        let a = systems[self.from as usize].position;
+        let b = systems[self.to as usize].position;
+        let total = (b - a).length();
+        let f = if total > 0.0 { ((t - self.launched) * self.speed / total).clamp(0.0, 1.0) } else { 1.0 };
+        a.lerp(b, f)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AdvanceReport {
+    pub steps: u64,
+    /// The CPU budget ran out before reaching the requested time.
+    pub lagging: bool,
+    /// Index into `history.events` of a milestone that stopped the advance.
+    pub milestone: Option<usize>,
+    pub cpu_time: Duration,
+}
+
+const TASK_BIOSPHERE: usize = 0;
+const TASK_CIV: usize = 1;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Universe {
+    pub settings: UniverseSettings,
+    pub params: ScienceParams,
+    pub start_time: f64,
+    pub time: f64,
+    pub systems: Vec<StarSystem>,
+    pub biospheres: Vec<Biosphere>,
+    pub civs: Vec<Civilization>,
+    pub probes: Vec<Probe>,
+    pub history: History,
+    pub scheduler: Scheduler,
+}
+
+fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
+    LifeMultipliers { life: s.life_rate, intelligence: s.intelligence_rate * s.life_rate }
+}
+
+/// Fertile land and fresh water follow from climate and the biosphere.
+fn refresh_derived_resources(body: &mut Body, vegetated: bool) {
+    let land = body.land_fraction() / 0.29;
+    let temperate = (-((body.temperature - 288.0) / 25.0).powi(2)).exp();
+    let liquid = body.hydro.ocean_fraction > 0.0;
+    body.resources.fertile_land = if liquid { land.min(2.5) * temperate * if vegetated { 1.0 } else { 0.05 } } else { 0.0 };
+    body.resources.fresh_water = if liquid { body.hydro.water_inventory.sqrt().min(1.5) } else if body.hydro.ice_fraction > 0.0 { 0.1 } else { 0.0 };
+}
+
+fn refresh_climate(sys: &mut StarSystem, b: usize, t: f64) {
+    let d = sys.stellar_distance(b);
+    let star = sys.star.clone();
+    let before = sys.bodies[b].hydro.ocean_fraction;
+    update_climate(&mut sys.bodies[b], &star, t, d);
+    let body = &mut sys.bodies[b];
+    if (body.hydro.ocean_fraction - before).abs() > 0.02 {
+        body.sea_level = terrain::sea_level_for(body.terrain_seed, body.hydro.ocean_fraction);
+    }
+    // Hot, wet worlds lose water to space (moist / runaway greenhouse).
+    if body.temperature > 340.0 && body.hydro.water_inventory > 0.0 {
+        body.hydro.water_inventory *= 0.995;
+    }
+}
+
+impl Universe {
+    /// Create a universe. This runs the deterministic prehistory of every biosphere, so it
+    /// can take a few seconds; call it off the main thread in interactive applications.
+    pub fn new(settings: UniverseSettings) -> Self {
+        let params = ScienceParams::default();
+        let mut systems = generate::generate_systems(&settings);
+        let start_time = if settings.scenario == Scenario::Sol { sol::dawn_of_humanity_start() } else { 0.0 };
+
+        let mut biospheres = Vec::new();
+        for (si, sys) in systems.iter_mut().enumerate() {
+            for b in 0..sys.bodies.len() {
+                if !sys.bodies[b].kind.has_surface() {
+                    continue;
+                }
+                refresh_climate(sys, b, start_time);
+                biospheres.push(Biosphere::new(si as u32, b as u32, assess(sys, b, start_time), start_time));
+            }
+        }
+
+        let mut history = History::default();
+        let mut u = Self {
+            settings: settings.clone(),
+            params,
+            start_time,
+            time: start_time,
+            systems,
+            biospheres: Vec::new(),
+            civs: Vec::new(),
+            probes: Vec::new(),
+            history: History::default(),
+            scheduler: Scheduler::default(),
+        };
+        let prehistory_events = u.run_prehistory(&mut biospheres);
+        u.biospheres = biospheres;
+        for e in prehistory_events {
+            history.push(e);
+        }
+        u.history = history;
+        u.history.push(Event {
+            time: start_time,
+            category: Category::Astronomy,
+            importance: 3,
+            title: "Observation begins".into(),
+            detail: format!("{} — seed {}, {} star systems", settings.scenario.label(), settings.seed, u.systems.len()),
+            system: None,
+            body: None,
+            civ: None,
+        });
+
+        match settings.scenario {
+            Scenario::GardenWorld => u.seed_garden_world(),
+            Scenario::Sol => u.seed_humanity(),
+            Scenario::Neighbourhood => {}
+        }
+
+        u.scheduler.add("biosphere", start_time, STEP_SECONDS);
+        u.scheduler.add("civilizations", start_time, SECONDS_PER_YEAR);
+        u
+    }
+
+    /// Simulate every biosphere from planet formation to the start epoch (in parallel; each
+    /// biosphere is independent and uses its own RNG streams, so this is deterministic).
+    /// Intelligence is not allowed to arise before observation begins.
+    fn run_prehistory(&mut self, biospheres: &mut [Biosphere]) -> Vec<Event> {
+        let seed = self.settings.seed;
+        let params = &self.params;
+        let mult = life_mult(&self.settings);
+        let start = self.start_time;
+        let skip_earth = self.settings.scenario == Scenario::Sol;
+        let systems = &self.systems;
+
+        let jobs: Vec<(usize, Biosphere, StarSystem)> = biospheres
+            .iter()
+            .enumerate()
+            .filter(|(_, bio)| !(skip_earth && bio.system == 0 && systems[0].bodies[bio.body as usize].name == "Earth"))
+            .map(|(i, bio)| (i, bio.clone(), systems[bio.system as usize].clone()))
+            .collect();
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
+        let chunk = jobs.len().div_ceil(threads).max(1);
+
+        let results: Vec<(usize, Biosphere, Body, Vec<Event>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = jobs
+                .chunks(chunk)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        chunk
+                            .iter()
+                            .map(|(i, bio, sys)| {
+                                let (bio, body, ev) = prehistory_one(seed, params, mult, bio.clone(), sys.clone(), start);
+                                (*i, bio, body, ev)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles.into_iter().flat_map(|h| h.join().expect("prehistory thread panicked")).collect()
+        });
+
+        let mut events = Vec::new();
+        for (i, bio, body, ev) in results {
+            let (s, b) = (bio.system as usize, bio.body as usize);
+            self.systems[s].bodies[b] = body;
+            biospheres[i] = bio;
+            events.extend(ev);
+        }
+        events.sort_by(|a, b| a.time.total_cmp(&b.time).then(a.system.cmp(&b.system)).then(a.body.cmp(&b.body)));
+        events
+    }
+
+    fn seed_garden_world(&mut self) {
+        let Some(bi) = self.biospheres.iter().position(|b| {
+            if b.system != 0 {
+                return false;
+            }
+            let body = &self.systems[0].bodies[b.body as usize];
+            body.kind == BodyKind::Rocky && body.hydro.ocean_fraction > 0.3 && b.habitability.score > 0.0
+        }) else {
+            return;
+        };
+        let t = self.start_time;
+        let bio = &mut self.biospheres[bi];
+        let body = &mut self.systems[0].bodies[bio.body as usize];
+        if bio.stage < Stage::ComplexEcosystems {
+            bio.stage = Stage::ComplexEcosystems;
+            bio.stage_since = t - 400.0 * SECONDS_PER_MYR;
+            bio.photosynthesis_since = Some(t - 2.5 * SECONDS_PER_GYR);
+            bio.biomass = 1.0;
+            bio.biodiversity = 0.85;
+            bio.land_life_myr = 400.0;
+            body.atmosphere.o2 = 0.21;
+            body.atmosphere.n2 = (body.atmosphere.n2 - 0.21).max(0.0);
+            body.atmosphere.normalise();
+            body.resources.coal = body.resources.coal.max(0.8);
+            body.resources.oil = body.resources.oil.max(0.8);
+        }
+        let name = body.name.clone();
+        let sys_idx = bio.system as usize;
+        let b = bio.body as usize;
+        refresh_climate(&mut self.systems[sys_idx], b, t);
+        let hab = assess(&self.systems[sys_idx], b, t);
+        let bio = &mut self.biospheres[bi];
+        bio.habitability = hab;
+        refresh_derived_resources(&mut self.systems[sys_idx].bodies[b], bio.vegetated());
+        self.history.push(Event { time: t, category: Category::Life, importance: 4, title: format!("{name} is a living world"), detail: "Forests, oceans and complex animal life cover the planet.".into(), system: Some(0), body: Some(b as u32), civ: None });
+    }
+
+    fn seed_humanity(&mut self) {
+        let t = self.start_time;
+        let Some(earth) = self.systems[0].find_body("Earth") else { return };
+        let bi = self.biospheres.iter().position(|b| b.system == 0 && b.body as usize == earth).expect("Earth biosphere");
+        {
+            let bio = &mut self.biospheres[bi];
+            bio.stage = Stage::Intelligent;
+            bio.stage_since = t;
+            bio.photosynthesis_since = Some(-2.7 * SECONDS_PER_GYR);
+            bio.biomass = 1.0;
+            bio.biodiversity = 0.9;
+            bio.land_life_myr = 470.0;
+        }
+        refresh_derived_resources(&mut self.systems[0].bodies[earth], true);
+        let species = Species {
+            name: "Humans".into(),
+            habitat: Habitat::Land,
+            mass_kg: 62.0,
+            lifespan_years: 70.0,
+            sociality: 0.75,
+            traits: vec!["Terrestrial".into(), "Persistence hunters".into(), "Tribal social structure".into()],
+        };
+        let mut civ = self.make_civ(BodyRef { system: 0, body: earth as u32 }, species, t);
+        civ.name = "Humanity".into();
+        civ.population = 100_000.0;
+        let graph = TechGraph::embedded();
+        for id in ["stone_tools", "fire", "hunting_weapons", "language"] {
+            civ.grant(graph, id, t);
+        }
+        for k in civ.knowledge.iter_mut() {
+            *k = 150.0;
+        }
+        self.biospheres[bi].civilization_present = true;
+        self.history.push(Event { time: t, category: Category::Civilization, importance: 5, title: "Humanity".into(), detail: "Anatomically modern humans live as hunter-gatherers with fire, stone tools and language.".into(), system: Some(0), body: Some(earth as u32), civ: Some(civ.id) });
+        self.civs.push(civ);
+    }
+
+    fn surface_context(&self, r: BodyRef) -> SurfaceContext {
+        let vegetated = self.biosphere(r).is_some_and(|b| b.vegetated());
+        SurfaceContext::new(self.body(r), vegetated)
+    }
+
+    fn make_civ(&mut self, r: BodyRef, species: Species, t: f64) -> Civilization {
+        let id = self.civs.len() as u32;
+        let surface = self.surface_context(r);
+        let moons = self.systems[r.system as usize].moons_of(r.body as usize).count();
+        let mut rng = Rng::stream(self.settings.seed, domain::SETTLEMENT_SITES, &[r.system as u64, r.body as u64, id as u64]);
+        Civilization::new(id, r.system, r.body, self.body(r), species, &surface, moons, t, &mut rng)
+    }
+
+    // ── Queries ─────────────────────────────────────────────────────────
+
+    pub fn system(&self, id: u32) -> &StarSystem {
+        &self.systems[id as usize]
+    }
+    pub fn body(&self, r: BodyRef) -> &Body {
+        &self.systems[r.system as usize].bodies[r.body as usize]
+    }
+    pub fn body_position(&self, r: BodyRef, t: f64) -> Vec3d {
+        self.systems[r.system as usize].body_position(r.body as usize, t)
+    }
+    pub fn biosphere(&self, r: BodyRef) -> Option<&Biosphere> {
+        self.biospheres.iter().find(|b| b.system == r.system && b.body == r.body)
+    }
+    pub fn civ_on(&self, r: BodyRef) -> Option<&Civilization> {
+        self.civs.iter().rev().find(|c| c.system == r.system && c.body == r.body && c.is_alive())
+    }
+    pub fn habitability(&self, r: BodyRef) -> Habitability {
+        match self.biosphere(r) {
+            Some(b) => b.habitability.clone(),
+            None => assess(self.system(r.system), r.body as usize, self.time),
+        }
+    }
+    pub fn gregorian(&self) -> bool {
+        self.settings.scenario == Scenario::Sol
+    }
+    pub fn date_label(&self) -> String {
+        format_date(self.time, self.start_time, self.gregorian())
+    }
+    pub fn tech_graph(&self) -> &'static TechGraph {
+        TechGraph::embedded()
+    }
+
+    // ── Advancing ───────────────────────────────────────────────────────
+
+    /// Advance the clock to `target`, running every scheduled step that falls due.
+    ///
+    /// * `budget` — stop early (and report `lagging`) when this much CPU time is spent.
+    ///   The clock then stays at the last completed step, so the outcome is unaffected.
+    /// * `stop_at_importance` — stop right after an event of at least this importance, so a
+    ///   viewer can slow down for milestones.
+    pub fn advance_to(&mut self, target: f64, budget: Option<Duration>, stop_at_importance: Option<u8>) -> AdvanceReport {
+        let started = Instant::now();
+        let mut report = AdvanceReport::default();
+        let history_len = self.history.events.len();
+        while let Some((task, due)) = self.scheduler.next() {
+            if due > target {
+                break;
+            }
+            let k = self.scheduler.tasks[task].steps;
+            match task {
+                TASK_BIOSPHERE => self.step_biospheres(due, k),
+                TASK_CIV => self.step_civs(due, k),
+                _ => {}
+            }
+            self.scheduler.complete(task);
+            self.time = due;
+            report.steps += 1;
+            if let Some(min) = stop_at_importance {
+                if let Some(i) = (history_len..self.history.events.len()).find(|&i| self.history.events[i].importance >= min) {
+                    report.milestone = Some(i);
+                    report.cpu_time = started.elapsed();
+                    return report;
+                }
+            }
+            if let Some(b) = budget {
+                if report.steps % 16 == 0 && started.elapsed() > b {
+                    report.lagging = true;
+                    report.cpu_time = started.elapsed();
+                    return report;
+                }
+            }
+        }
+        self.time = self.time.max(target);
+        report.cpu_time = started.elapsed();
+        report
+    }
+
+    pub fn advance_by(&mut self, dt: f64) -> AdvanceReport {
+        self.advance_to(self.time + dt, None, None)
+    }
+
+    fn step_biospheres(&mut self, t: f64, k: u64) {
+        let seed = self.settings.seed;
+        let mult = life_mult(&self.settings);
+        let mut new_intelligence = Vec::new();
+        for bi in 0..self.biospheres.len() {
+            let (s, b) = (self.biospheres[bi].system as usize, self.biospheres[bi].body as usize);
+            if k % 100 == 0 {
+                crate::planet::environment::carbon_cycle(&mut self.systems[s].bodies[b], 1.0);
+                refresh_climate(&mut self.systems[s], b, t);
+                let hab = assess(&self.systems[s], b, t);
+                let bio = &mut self.biospheres[bi];
+                bio.habitability = hab;
+                let vegetated = bio.vegetated();
+                refresh_derived_resources(&mut self.systems[s].bodies[b], vegetated);
+            }
+            let bio = &mut self.biospheres[bi];
+            if bio.habitability.score <= 0.0 && bio.stage == Stage::Sterile {
+                continue;
+            }
+            let flare = self.systems[s].star.flare_activity_at(t);
+            let mut rng = Rng::stream(seed, domain::BIOSPHERE, &[s as u64, b as u64, k]);
+            let body = &mut self.systems[s].bodies[b];
+            let events = bio.step(body, &self.params, mult, flare, t, &mut rng);
+            let name = body.name.clone();
+            for e in events {
+                if e == LifeEvent::StageReached(Stage::Intelligent) {
+                    new_intelligence.push(BodyRef { system: s as u32, body: b as u32 });
+                }
+                if let Some(ev) = life_event(&e, &name, t, s as u32, b as u32) {
+                    self.history.push(ev);
+                }
+            }
+        }
+        for r in new_intelligence {
+            self.spawn_civilization(r, t);
+        }
+    }
+
+    fn spawn_civilization(&mut self, r: BodyRef, t: f64) {
+        let mut rng = Rng::stream(self.settings.seed, domain::SPECIES, &[r.system as u64, r.body as u64, self.civs.len() as u64]);
+        let species = Species::generate(&mut rng, self.body(r));
+        let civ = self.make_civ(r, species, t);
+        if let Some(bio) = self.biospheres.iter_mut().find(|b| b.system == r.system && b.body == r.body) {
+            bio.civilization_present = true;
+        }
+        let body_name = self.body(r).name.clone();
+        self.history.push(Event {
+            time: t,
+            category: Category::Life,
+            importance: 5,
+            title: format!("Intelligence emerges on {body_name}"),
+            detail: format!("The {} — {} — begin to use tools and language.", civ.species.name, civ.species.traits.join(", ").to_lowercase()),
+            system: Some(r.system),
+            body: Some(r.body),
+            civ: Some(civ.id),
+        });
+        self.civs.push(civ);
+    }
+
+    fn step_civs(&mut self, t: f64, k: u64) {
+        let graph = TechGraph::embedded();
+        let seed = self.settings.seed;
+        for ci in 0..self.civs.len() {
+            if !self.civs[ci].is_alive() {
+                continue;
+            }
+            let (s, b) = (self.civs[ci].system as usize, self.civs[ci].body as usize);
+            let r = BodyRef { system: s as u32, body: b as u32 };
+            if k % 10 == 0 {
+                refresh_climate(&mut self.systems[s], b, t);
+                let vegetated = self.biosphere(r).is_some_and(|x| x.vegetated());
+                refresh_derived_resources(&mut self.systems[s].bodies[b], vegetated);
+            }
+            let sys = &self.systems[s];
+            let moons = sys.moons_of(b).count();
+            let colony_targets: Vec<(u32, f64)> = sys
+                .bodies
+                .iter()
+                .enumerate()
+                .filter(|(i, x)| *i != b && x.kind.has_surface() && x.mass > 1e21)
+                .map(|(i, x)| (i as u32, 1.0 / (1.0 + (x.gravity_g() - 0.7).abs()) * (-((x.temperature - 250.0) / 120.0).powi(2)).exp()))
+                .collect();
+            let world = WorldView {
+                env: environment_for(&sys.bodies[b], moons, colony_targets.len(), t),
+                surface: self.surface_context(r),
+                colony_targets,
+                params: &self.params,
+                tech_rate: self.settings.tech_rate,
+            };
+            let mut rng = Rng::stream(seed, domain::CIV_STEP, &[ci as u64, k]);
+            let body = &mut self.systems[s].bodies[b];
+            let events = self.civs[ci].step_year(body, &world, graph, t, k, &mut rng);
+            for e in events {
+                self.history.push(Event { time: t, category: e.category, importance: e.importance, title: e.title, detail: e.detail, system: Some(s as u32), body: Some(b as u32), civ: Some(ci as u32) });
+            }
+            if let CivStatus::Extinct { .. } = self.civs[ci].status {
+                if let Some(bio) = self.biospheres.iter_mut().find(|x| x.system == r.system && x.body == r.body) {
+                    bio.civilization_present = false;
+                    bio.stage = Stage::ComplexEcosystems;
+                    bio.stage_since = t;
+                }
+            }
+        }
+        self.step_contact(t);
+        self.step_probes(t, k);
+    }
+
+    /// Radio signals expand at light speed; civilizations with radio astronomy hear them.
+    fn step_contact(&mut self, t: f64) {
+        let n = self.civs.len();
+        for a in 0..n {
+            let Some(since) = self.civs[a].radio_since else { continue };
+            let radius = SPEED_OF_LIGHT * (t - since);
+            for b in 0..n {
+                if a == b || !self.civs[b].is_alive() || !self.civs[b].flags.contains("radio_astronomy") || self.civs[b].detected.contains(&(a as u32)) {
+                    continue;
+                }
+                let pa = self.systems[self.civs[a].system as usize].position;
+                let pb = self.systems[self.civs[b].system as usize].position;
+                let dist = (pa - pb).length();
+                if radius >= dist {
+                    self.civs[b].detected.push(a as u32);
+                    self.civs[b].pressures.contact = 1.0;
+                    let (name_a, name_b) = (self.civs[a].name.clone(), self.civs[b].name.clone());
+                    self.history.push(Event {
+                        time: t,
+                        category: Category::Contact,
+                        importance: 5,
+                        title: format!("{name_b} detect signals from {name_a}"),
+                        detail: format!("Radio emissions that left {:.1} light-years away are recognised as artificial.", dist / LIGHT_YEAR),
+                        system: Some(self.civs[b].system),
+                        body: Some(self.civs[b].body),
+                        civ: Some(b as u32),
+                    });
+                }
+            }
+        }
+    }
+
+    fn step_probes(&mut self, t: f64, k: u64) {
+        for ci in 0..self.civs.len() {
+            let c = &self.civs[ci];
+            if !c.is_alive() || !c.flags.contains("probes") || k % 200 != 0 {
+                continue;
+            }
+            let home = self.systems[c.system as usize].position;
+            let targeted: Vec<u32> = self.probes.iter().filter(|p| p.civ == ci as u32).map(|p| p.to).collect();
+            let target = self
+                .systems
+                .iter()
+                .filter(|s| s.id != c.system && !targeted.contains(&s.id))
+                .min_by(|a, b| (a.position - home).length().total_cmp(&(b.position - home).length()));
+            if let Some(target) = target {
+                let speed = self.params.civilization.probe_speed_c * SPEED_OF_LIGHT;
+                let (to, to_name) = (target.id, target.name.clone());
+                self.probes.push(Probe { civ: ci as u32, from: c.system, to, launched: t, speed, arrived: false });
+                self.civs[ci].probes_launched += 1;
+                let name = self.civs[ci].name.clone();
+                self.history.push(Event { time: t, category: Category::Space, importance: 5, title: format!("Probe launched towards {to_name}"), detail: format!("{name} send a robotic emissary at {:.0}% of light speed.", self.params.civilization.probe_speed_c * 100.0), system: Some(self.civs[ci].system), body: Some(self.civs[ci].body), civ: Some(ci as u32) });
+            }
+        }
+        for p in self.probes.iter_mut().filter(|p| !p.arrived) {
+            let dist = (self.systems[p.to as usize].position - self.systems[p.from as usize].position).length();
+            if (t - p.launched) * p.speed >= dist {
+                p.arrived = true;
+                self.history.push(Event { time: t, category: Category::Space, importance: 5, title: format!("Probe arrives at {}", self.systems[p.to as usize].name), detail: format!("After {:.0} years in flight.", (t - p.launched) / SECONDS_PER_YEAR), system: Some(p.to), body: None, civ: Some(p.civ) });
+            }
+        }
+    }
+}
+
+fn life_event(e: &LifeEvent, body: &str, t: f64, s: u32, b: u32) -> Option<Event> {
+    let (importance, category, title, detail) = match e {
+        LifeEvent::StageReached(Stage::Intelligent) => return None, // reported by spawn_civilization
+        LifeEvent::StageReached(stage) => {
+            let imp = match stage {
+                Stage::Prebiotic => 1,
+                Stage::Microbial | Stage::ComplexEcosystems => 4,
+                _ => 3,
+            };
+            (imp, Category::Life, format!("{} on {body}", stage.label()), format!("Life on {body} reaches a new stage: {}.", stage.label().to_lowercase()))
+        }
+        LifeEvent::Oxygenation => (3, Category::Life, format!("Great Oxidation on {body}"), "Photosynthesis fills the atmosphere with free oxygen.".into()),
+        LifeEvent::MassExtinction { severity, regressed } => (
+            if *regressed { 4 } else { 2 },
+            Category::Disaster,
+            format!("Mass extinction on {body}"),
+            format!("{:.0}% of species are lost{}.", severity * 100.0, if *regressed { "; life is set back a full stage" } else { "" }),
+        ),
+        LifeEvent::Sterilised => (4, Category::Disaster, format!("{body} sterilised"), "A catastrophic event wipes out all life.".into()),
+        LifeEvent::Collapse => (4, Category::Life, format!("Biosphere of {body} dies"), "The environment can no longer support life.".into()),
+    };
+    Some(Event { time: t, category, importance, title, detail, system: Some(s), body: Some(b), civ: None })
+}
+
+/// Simulate one biosphere from formation to `start` (prehistory).
+fn prehistory_one(seed: u64, params: &ScienceParams, mult: LifeMultipliers, mut bio: Biosphere, mut sys: StarSystem, start: f64) -> (Biosphere, Body, Vec<Event>) {
+    let b = bio.body as usize;
+    let s = bio.system;
+    let formed = sys.star.formed_at + 0.2 * SECONDS_PER_GYR;
+    let mut events = Vec::new();
+    if formed < start {
+        let steps = ((start - formed) / STEP_SECONDS) as u64;
+        let mut t = start - steps as f64 * STEP_SECONDS;
+        bio.stage_since = t;
+        for k in 0..steps {
+            t += STEP_SECONDS;
+            if k % 100 == 0 {
+                crate::planet::environment::carbon_cycle(&mut sys.bodies[b], 1.0);
+                refresh_climate(&mut sys, b, t);
+                let mut hab = assess(&sys, b, t);
+                // Observation starts at `start`: intelligence cannot predate it.
+                hab.max_stage = hab.max_stage.min(Stage::ComplexEcosystems);
+                bio.habitability = hab;
+            }
+            if bio.habitability.score <= 0.0 && bio.stage == Stage::Sterile {
+                continue;
+            }
+            let flare = sys.star.flare_activity_at(t);
+            let mut rng = Rng::stream(seed, domain::PREHISTORY, &[s as u64, b as u64, k]);
+            let name = sys.bodies[b].name.clone();
+            for e in bio.step(&mut sys.bodies[b], params, mult, flare, t, &mut rng) {
+                let keep = matches!(e, LifeEvent::StageReached(Stage::Microbial | Stage::Multicellular | Stage::ComplexEcosystems) | LifeEvent::Oxygenation | LifeEvent::Sterilised | LifeEvent::Collapse);
+                if keep {
+                    if let Some(ev) = life_event(&e, &name, t, s, b as u32) {
+                        events.push(ev);
+                    }
+                }
+            }
+        }
+    }
+    refresh_climate(&mut sys, b, start);
+    let mut body = sys.bodies[b].clone();
+    body.sea_level = terrain::sea_level_for(body.terrain_seed, body.hydro.ocean_fraction);
+    sys.bodies[b] = body.clone();
+    bio.habitability = assess(&sys, b, start);
+    refresh_derived_resources(&mut body, bio.vegetated());
+    (bio, body, events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::time::SECONDS_PER_KYR;
+
+    fn small(scenario: Scenario, seed: u64) -> UniverseSettings {
+        UniverseSettings { seed, scenario, system_count: 6, ..Default::default() }
+    }
+
+    #[test]
+    fn creation_is_deterministic() {
+        let a = Universe::new(small(Scenario::GardenWorld, 7));
+        let b = Universe::new(small(Scenario::GardenWorld, 7));
+        assert_eq!(serde_json::to_string(&a).unwrap(), serde_json::to_string(&b).unwrap());
+    }
+
+    #[test]
+    fn outcome_is_independent_of_frame_chunking() {
+        let mut a = Universe::new(small(Scenario::Sol, 3));
+        let mut b = a.clone();
+        let total = 3.0 * SECONDS_PER_KYR;
+        a.advance_by(total);
+        let mut done = 0.0;
+        let mut i = 0;
+        while done < total {
+            let dt = [0.37, 13.0, 101.3, 7.7][i % 4] * SECONDS_PER_YEAR;
+            let next = (done + dt).min(total);
+            b.advance_to(b.start_time + next, None, None);
+            done = next;
+            i += 1;
+        }
+        assert_eq!(serde_json::to_string(&a).unwrap(), serde_json::to_string(&b).unwrap());
+    }
+
+    #[test]
+    fn humanity_grows_and_learns() {
+        let mut u = Universe::new(small(Scenario::Sol, 11));
+        let pop0 = u.civs[0].population;
+        let k0: f64 = u.civs[0].knowledge.iter().sum();
+        u.advance_by(20.0 * SECONDS_PER_KYR);
+        let c = &u.civs[0];
+        assert!(c.is_alive());
+        assert!(c.population > pop0, "{} -> {}", pop0, c.population);
+        assert!(c.knowledge.iter().sum::<f64>() > k0);
+        assert!(c.sites.iter().filter(|s| s.active()).count() > 1);
+    }
+
+    #[test]
+    fn garden_world_has_complex_life_at_start() {
+        let u = Universe::new(small(Scenario::GardenWorld, 21));
+        assert!(u.biospheres.iter().any(|b| b.system == 0 && b.stage == Stage::ComplexEcosystems));
+        assert!(u.civs.is_empty());
+    }
+}
