@@ -1,102 +1,48 @@
 # Cosmogon
 
-**A real-time digital universe simulator.**
+**A living universe.** A physically grounded space simulator in which potentially habitable worlds can
+develop life and, sometimes, civilizations. Those civilizations discover technology through causes, not
+timers, and change their planets in ways you can see from orbit.
 
-> *Not a game. Not a toy. A universe.*
+![Main menu](docs/images/menu.jpg)
 
----
+| Humanity in an alternative 2300 CE | The night side of an industrial world |
+|---|---|
+| ![Civilization](docs/images/sol_modern.jpg) | ![City lights](docs/images/sol_night3.jpg) |
 
-## What is this?
+## Try it
+* **macOS:** open `dist/Cosmogon-<version>-macOS.dmg`, drag Cosmogon to Applications, double-click.
+  (Unsigned builds: right-click → *Open* the first time.) To build it yourself: `scripts/package-macos.sh`.
+* **Windows / Linux:** push a `v*` tag; [`.github/workflows/release.yml`](.github/workflows/release.yml) builds a
+  Windows installer and portable `.exe`, a universal macOS DMG and a Linux tarball.
+* **From source:** `cargo run --release -p cosmogon` (see [BUILDING.md](BUILDING.md)).
 
-Cosmogon is a scientifically accurate, real-time digital universe simulator built in Rust. It simulates the entire solar system with real orbital mechanics, physically-based rendering, atmospheric scattering, and time acceleration — all running at 60fps.
+Three scenarios: a realistic **stellar neighbourhood** (often lifeless — that's the point), a **garden world**
+rich in complex life, and **Sol — Dawn of Humanity**, the real Solar System 200,000 years ago. Pick a speed from
+real time to 100 million years per second; the simulation slows down by itself for milestones.
 
-The goal: make someone open the GitHub and think *"How did one person even build this?"*
+## What's simulated
+Stars that brighten and die · Keplerian orbits exact at any time scale · procedural systems with statistically
+plausible stars, planets, moons, belts and rings · climate with greenhouse, carbon cycle and ice ages ·
+habitability as a breakdown of factors · life from prebiotic chemistry to intelligence, with oxygenation, fossil-fuel
+formation and mass extinctions · civilizations with population, 13 knowledge domains, pressures, crises and collapse ·
+a 56-technology causal graph with alternative routes and resource/environment gates · settlements, roads, rail and
+sea lanes · satellites, colonies, probes and radio signals that other civilizations can detect · deterministic,
+versioned saves.
 
-## Features
+Ask any civilization *why*: every discovery records its route and drivers, and the inspector explains what is still
+missing for the next ones ("Bronze working — needs tin ≥ 0.15× Earth").
 
-- **Real Solar System** — Sun, 8 planets, major moons, all with real orbital elements
-- **Keplerian Orbital Mechanics** — Accurate orbital periods, eccentricities, inclinations
-- **Physically Based Rendering** — PBR materials, HDR, bloom, atmospheric scattering
-- **Time Acceleration** — 1x to 10,000x speed, pause, step through time
-- **Star Background** — 51 real stars with correct spectral colors
-- **Procedural Terrain** — Earth, Mars, Moon with terrain generation
-- **Atmospheric Scattering** — Rayleigh + Mie for Earth and Venus
-- **Object Inspector** — Click any body to see mass, radius, orbital parameters
-- **Camera System** — Fly-through, orbit, zoom with scroll wheel
-
-## Architecture
-
-```
-cosmogon/
-├── cosmogon_core      # Math, constants, coordinate systems
-├── cosmogon_ecs       # ECS components, resources, system sets
-├── cosmogon_physics   # Gravity, orbital mechanics, integrators
-├── cosmogon_render    # wgpu rendering pipeline, shaders
-├── cosmogon_scene     # Solar system data, celestial bodies
-├── cosmogon_ui        # egui-based UI panels
-└── cosmogon_app       # Main application, game loop
-```
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Language | Rust |
-| Rendering | wgpu (WebGPU) |
-| ECS | bevy_ecs |
-| UI | egui |
-| Math | glam (f32) + custom f64 |
-| Parallelism | rayon |
-| Serialization | serde |
-
-## Quick Start
-
-### Prerequisites
-
-- Rust 1.75+ (install via [rustup](https://rustup.rs/))
-- A GPU with Vulkan/Metal/WebGPU support
-- Git
-
-### Build & Run
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/cosmogon.git
-cd cosmogon
-
-# Build in release mode
-cargo build --release
-
-# Run the simulator
-cargo run --release -p cosmogon_app
-```
-
-### Controls
-
-| Key | Action |
-|-----|--------|
-| `Space` | Pause / Resume time |
-| `1-5` | Set time acceleration (1x, 10x, 100x, 1000x, 10000x) |
-| `Scroll` | Zoom in/out |
-| `Mouse Drag` | Orbit camera |
-| `Click` | Select celestial body |
+## Controls
+Drag to orbit · scroll (or W/S) to zoom from metres to light-years · click to select · double-click or **F** to fly
+there · **Home** for the whole system · **Space** pause · **, .** speed · **Tab** hide UI · **⌘/Ctrl+S** quick save ·
+**F3** developer overlay · **F1** help · **Esc** menu.
 
 ## Documentation
-
-- [Product Requirements](PRD.md) — What we're building and why
-- [Architecture](ARCHITECTURE.md) — How it's all structured
-- [Roadmap](docs/ROADMAP.md) — Multi-year development plan
-- [Feature Backlog](docs/FEATURE_BACKLOG.md) — 300+ planned features
-- [Brain](docs/brain.md) — Living knowledge base
-- [Learning Roadmap](docs/LEARNING_ROADMAP.md) — What to learn and when
-- [Development Workflow](docs/DEVELOPMENT_WORKFLOW.md) — How we work
+[ARCHITECTURE](ARCHITECTURE.md) · [ROADMAP](ROADMAP.md) · [SIMULATION](SIMULATION.md) ·
+[CIVILIZATION_MODEL](CIVILIZATION_MODEL.md) · [TECHNOLOGY_MODEL](TECHNOLOGY_MODEL.md) · [RENDERING](RENDERING.md) ·
+[BUILDING](BUILDING.md) · [CHANGELOG](CHANGELOG.md) · [prototype audit](docs/AUDIT.md) ·
+[engine assessment](docs/ENGINE_ASSESSMENT.md) · [assets & licensing](ASSETS.md)
 
 ## License
-
-MIT OR Apache-2.0
-
-## Acknowledgments
-
-- Inspired by [Space Engine](http://spaceengine.org/), [Kerbal Space Program](https://www.kerbalspaceprogram.com/), [Universe Sandbox](https://universesandbox.com/)
-- Real orbital data from [JPL Solar System Dynamics](https://ssd.jpl.nasa.gov/)
-- Rendering techniques from [Learn OpenGL](https://learnopengl.com/) and [Real Shading in Unreal Engine 4](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf)
+MIT OR Apache-2.0.

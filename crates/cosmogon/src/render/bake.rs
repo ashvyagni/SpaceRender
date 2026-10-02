@@ -6,7 +6,7 @@
 //! quadtree terrain LOD of Phase 3 (see ROADMAP.md).
 
 use cosmogon_sim::astro::{Body, BodyKind};
-use cosmogon_sim::civ::settlements::{LinkKind, Tier};
+use cosmogon_sim::civ::settlements::LinkKind;
 use cosmogon_sim::civ::Civilization;
 use cosmogon_sim::noise::{fbm3, ridged3};
 use cosmogon_sim::planet::terrain::{dir_from_lat_lon, Biome, SurfaceContext};

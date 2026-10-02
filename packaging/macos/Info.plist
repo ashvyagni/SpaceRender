@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>                 <string>Cosmogon</string>
+    <key>CFBundleDisplayName</key>          <string>Cosmogon</string>
+    <key>CFBundleIdentifier</key>           <string>org.cosmogon.app</string>
+    <key>CFBundleExecutable</key>           <string>cosmogon</string>
+    <key>CFBundleIconFile</key>             <string>Cosmogon</string>
+    <key>CFBundlePackageType</key>          <string>APPL</string>
+    <key>CFBundleShortVersionString</key>   <string>__VERSION__</string>
+    <key>CFBundleVersion</key>              <string>__VERSION__</string>
+    <key>LSMinimumSystemVersion</key>       <string>11.0</string>
+    <key>LSApplicationCategoryType</key>    <string>public.app-category.education</string>
+    <key>NSHighResolutionCapable</key>      <true/>
+    <key>NSHumanReadableCopyright</key>     <string>Cosmogon contributors · MIT OR Apache-2.0</string>
+</dict>
+</plist>

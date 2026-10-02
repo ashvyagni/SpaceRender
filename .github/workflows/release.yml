@@ -1,0 +1,92 @@
+name: Release
+
+# Push a tag like v0.3.0 (or run manually) to build installable packages for every platform.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build universal .app and .dmg
+        env:
+          UNIVERSAL: "1"
+          # Optional: set these secrets to produce a signed (and then notarisable) build.
+          SIGN_ID: ${{ secrets.MACOS_SIGN_ID }}
+        run: scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmogon-macos
+          path: dist/*.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release executable
+        run: cargo build --release -p cosmogon
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/cosmogon.exe dist/Cosmogon.exe
+          $v = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq cosmogon | Select-Object -ExpandProperty version
+          Compress-Archive -Path dist/Cosmogon.exe -DestinationPath "dist/Cosmogon-$v-Windows-portable.zip"
+          "COSMOGON_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/cosmogon.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmogon-windows
+          path: |
+            dist/*.zip
+            dist/*Setup.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - name: Build and archive
+        run: |
+          cargo build --release -p cosmogon
+          mkdir -p dist/cosmogon
+          cp target/release/cosmogon dist/cosmogon/
+          cp packaging/icons/cosmogon-1024.png dist/cosmogon/cosmogon.png
+          tar -C dist -czf dist/Cosmogon-linux-x86_64.tar.gz cosmogon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmogon-linux
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [macos, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
