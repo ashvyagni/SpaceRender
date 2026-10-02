@@ -248,7 +248,7 @@ pub fn update(sites: &mut [Site], links: &mut Vec<Link>, adj: &Adjacency, popula
     order.sort_by(|&a, &b| sites[a].founded.unwrap().total_cmp(&sites[b].founded.unwrap()).then(sites[b].score.total_cmp(&sites[a].score)));
     let urban = population * p.urbanisation.clamp(0.0, 1.0);
     let rural_each = ((population - urban) / order.len().max(1) as f64).min(p.rural_cap);
-    let alpha = 0.6 + 0.8 * p.urbanisation.clamp(0.0, 1.0);
+    let alpha = 0.55 + 0.5 * p.urbanisation.clamp(0.0, 1.0);
     let weights: Vec<f64> = order.iter().enumerate().map(|(rank, &i)| sites[i].score * ((rank + 1) as f64).powf(-alpha)).collect();
     let total: f64 = weights.iter().sum::<f64>().max(1e-12);
     let mut promotions = Vec::new();
