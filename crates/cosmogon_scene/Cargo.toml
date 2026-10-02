@@ -1,0 +1,16 @@
+[package]
+name = "cosmogon_scene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Solar system data, celestial body definitions, and scene graph"
+
+[dependencies]
+cosmogon_core = { workspace = true }
+cosmogon_ecs = { workspace = true }
+bevy_ecs = { workspace = true }
+glam = { workspace = true }
+serde = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+log = { workspace = true }

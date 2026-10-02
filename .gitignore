@@ -1,0 +1,27 @@
+# Target
+/target/
+**/*.rs.bk
+
+# Cargo
+# Cargo.lock is committed: this is an application workspace
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Assets (large textures, keep in git LFS)
+# assets/textures/*.jpg
+# assets/textures/*.png
+
+# Profiling
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data

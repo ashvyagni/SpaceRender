@@ -1,0 +1,19 @@
+[package]
+name = "cosmogon_render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "wgpu rendering pipeline, shaders, and visual systems"
+
+[dependencies]
+cosmogon_core = { workspace = true }
+cosmogon_ecs = { workspace = true }
+cosmogon_scene = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }
+pollster = { workspace = true }
+image = { workspace = true }
+bevy_ecs = { workspace = true }

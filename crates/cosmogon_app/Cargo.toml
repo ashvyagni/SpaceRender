@@ -1,0 +1,21 @@
+[package]
+name = "cosmogon_app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Main application entry point, windowing, and game loop"
+
+[dependencies]
+cosmogon_core = { workspace = true }
+cosmogon_ecs = { workspace = true }
+cosmogon_physics = { workspace = true }
+cosmogon_render = { workspace = true }
+cosmogon_scene = { workspace = true }
+cosmogon_ui = { workspace = true }
+bevy_ecs = { workspace = true }
+glam = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+pollster = { workspace = true }

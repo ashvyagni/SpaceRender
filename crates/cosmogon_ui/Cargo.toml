@@ -1,0 +1,17 @@
+[package]
+name = "cosmogon_ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "egui-based UI panels, object inspector, and time controls"
+
+[dependencies]
+bevy_ecs = { workspace = true }
+cosmogon_core = { workspace = true }
+cosmogon_ecs = { workspace = true }
+cosmogon_scene = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }

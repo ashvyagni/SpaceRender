@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cosmogon_app",
+    "crates/cosmogon_core",
+    "crates/cosmogon_ecs",
+    "crates/cosmogon_physics",
+    "crates/cosmogon_render",
+    "crates/cosmogon_scene",
+    "crates/cosmogon_ui",
+    "crates/cosmogon_bevy",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/flamexmystix/cosmogon"
+description = "A real-time digital universe simulator"
+
+[workspace.dependencies]
+# Core
+cosmogon_core = { path = "crates/cosmogon_core" }
+cosmogon_ecs = { path = "crates/cosmogon_ecs" }
+cosmogon_physics = { path = "crates/cosmogon_physics" }
+cosmogon_render = { path = "crates/cosmogon_render" }
+cosmogon_scene = { path = "crates/cosmogon_scene" }
+cosmogon_ui = { path = "crates/cosmogon_ui" }
+cosmogon_app = { path = "crates/cosmogon_app" }
+
+# Rendering
+wgpu = "24.0"
+winit = "0.30"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+
+# ECS
+bevy_ecs = "0.15"
+
+# Math
+glam = { version = "0.29", features = ["serde", "bytemuck"] }
+
+# UI
+egui = "0.30"
+egui-wgpu = "0.30"
+egui-winit = "0.30"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Async
+async-trait = "0.1"
+
+# Error handling
+thiserror = "2"
+
+# Random (for procedural generation)
+rand = "0.8"
+rand_chacha = "0.3"
+
+# Parallelism
+rayon = "1.10"
+
+# Image processing
+image = "0.25"
+
+# Numeric
+num-traits = "0.2"

@@ -1,0 +1,13 @@
+[package]
+name = "cosmogon_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core types, math, constants, and coordinate systems for Cosmogon"
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+bytemuck = { workspace = true }
+thiserror = { workspace = true }
+num-traits = { workspace = true }

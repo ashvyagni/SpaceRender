@@ -1,0 +1,11 @@
+[package]
+name = "cosmogon_ecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ECS components, bundles, and system sets for Cosmogon"
+
+[dependencies]
+cosmogon_core = { workspace = true }
+bevy_ecs = { workspace = true }
+glam = { workspace = true }
