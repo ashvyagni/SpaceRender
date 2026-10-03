@@ -35,22 +35,35 @@ pub enum Scenario {
     GardenWorld,
     /// The real Solar System, 200,000 years ago, with early humans on Earth.
     Sol,
+    /// The real Solar System today, started from NASA/JPL Horizons state vectors, with
+    /// dynamic (N-body) gravity. Earth has its present biosphere; no civilization model.
+    SolarSystemLab,
+    /// A single procedurally generated star system.
+    StarSystem,
+    /// A Sun-like star and nothing else: build your own system.
+    EmptySystem,
 }
 
 impl Scenario {
-    pub const ALL: [Scenario; 3] = [Scenario::Neighbourhood, Scenario::GardenWorld, Scenario::Sol];
+    pub const ALL: [Scenario; 6] = [Scenario::SolarSystemLab, Scenario::Sol, Scenario::GardenWorld, Scenario::StarSystem, Scenario::Neighbourhood, Scenario::EmptySystem];
     pub fn label(self) -> &'static str {
         match self {
             Scenario::Neighbourhood => "Stellar neighbourhood",
             Scenario::GardenWorld => "Garden world",
             Scenario::Sol => "Sol — Dawn of Humanity",
+            Scenario::SolarSystemLab => "Solar System Lab",
+            Scenario::StarSystem => "Procedural star system",
+            Scenario::EmptySystem => "Empty system",
         }
     }
     pub fn description(self) -> &'static str {
         match self {
             Scenario::Neighbourhood => "A procedural neighbourhood of stars with realistic statistics. With realistic settings you may never see intelligent life.",
             Scenario::GardenWorld => "The central star hosts an Earth-like world teeming with complex life. Watch whether intelligence emerges, and what it becomes.",
-            Scenario::Sol => "The real Solar System 200,000 years ago. Early humans have fire and stone tools; their history is not written yet. (Earth's surface is procedural for now.)",
+            Scenario::Sol => "The real Solar System 200,000 years ago. Early humans have fire and stone tools; their history is not written yet.",
+            Scenario::SolarSystemLab => "The real Solar System on 1 January 2026, from NASA/JPL Horizons state vectors, with dynamic N-body gravity. Earth has its present-day biosphere.",
+            Scenario::StarSystem => "One physically plausible star system generated from the seed.",
+            Scenario::EmptySystem => "A Sun-like star alone in space. Add planets, moons and asteroids yourself.",
         }
     }
 }
@@ -67,11 +80,37 @@ pub struct UniverseSettings {
     /// Multiplies research output and discovery rates.
     pub tech_rate: f64,
     pub resource_abundance: f64,
+    /// Start the home system with dynamic (N-body) gravity using these settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physics: Option<crate::astro::dynamics::PhysicsSettings>,
+    /// Which simulation layers run.
+    #[serde(default, skip_serializing_if = "EnabledSystems::all")]
+    pub systems: EnabledSystems,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EnabledSystems {
+    /// Biospheres evolve (life can arise, evolve and go extinct).
+    pub life: bool,
+    /// Intelligent species and civilizations are simulated.
+    pub civilization: bool,
+}
+
+impl Default for EnabledSystems {
+    fn default() -> Self {
+        Self { life: true, civilization: true }
+    }
+}
+
+impl EnabledSystems {
+    pub fn all(&self) -> bool {
+        self.life && self.civilization
+    }
 }
 
 impl Default for UniverseSettings {
     fn default() -> Self {
-        Self { seed: 1, scenario: Scenario::Neighbourhood, system_count: 24, life_rate: 1.0, intelligence_rate: 1.0, tech_rate: 1.0, resource_abundance: 1.0 }
+        Self { seed: 1, scenario: Scenario::Neighbourhood, system_count: 24, life_rate: 1.0, intelligence_rate: 1.0, tech_rate: 1.0, resource_abundance: 1.0, physics: None, systems: EnabledSystems::default() }
     }
 }
 
@@ -115,6 +154,8 @@ pub struct AdvanceReport {
 
 const TASK_BIOSPHERE: usize = 0;
 const TASK_CIV: usize = 1;
+/// Orbit → climate refresh for dynamic systems (added when the first system becomes dynamic).
+pub(crate) const TASK_ENV: usize = 2;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Universe {
@@ -128,6 +169,10 @@ pub struct Universe {
     pub probes: Vec<Probe>,
     pub history: History,
     pub scheduler: Scheduler,
+    /// Journal of user modifications (sandboxes): with the initial state this reproduces
+    /// the experiment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<crate::sandbox::EditRecord>,
 }
 
 fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
@@ -135,7 +180,7 @@ fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
 }
 
 /// Fertile land and fresh water follow from climate and the biosphere.
-fn refresh_derived_resources(body: &mut Body, vegetated: bool) {
+pub(crate) fn refresh_derived_resources(body: &mut Body, vegetated: bool) {
     let land = body.land_fraction() / 0.29;
     let temperate = (-((body.temperature - 288.0) / 25.0).powi(2)).dexp();
     let liquid = body.hydro.ocean_fraction > 0.0;
@@ -143,7 +188,7 @@ fn refresh_derived_resources(body: &mut Body, vegetated: bool) {
     body.resources.fresh_water = if liquid { body.hydro.water_inventory.sqrt().min(1.5) } else if body.hydro.ice_fraction > 0.0 { 0.1 } else { 0.0 };
 }
 
-fn refresh_climate(sys: &mut StarSystem, b: usize, t: f64) {
+pub(crate) fn refresh_climate(sys: &mut StarSystem, b: usize, t: f64) {
     let d = sys.stellar_distance(b);
     let star = sys.star.clone();
     let before = sys.bodies[b].hydro.ocean_fraction;
@@ -164,7 +209,10 @@ impl Universe {
     pub fn new(settings: UniverseSettings) -> Self {
         let params = ScienceParams::default();
         let mut systems = generate::generate_systems(&settings);
-        let start_time = if settings.scenario == Scenario::Sol { sol::dawn_of_humanity_start() } else { 0.0 };
+        let mut start_time = if settings.scenario == Scenario::Sol { sol::dawn_of_humanity_start() } else { 0.0 };
+        if settings.scenario == Scenario::SolarSystemLab {
+            start_time = crate::astro::horizons::apply_to_sol(&mut systems[0], settings.physics.unwrap_or_default());
+        }
 
         let mut biospheres = Vec::new();
         for (si, sys) in systems.iter_mut().enumerate() {
@@ -189,6 +237,7 @@ impl Universe {
             probes: Vec::new(),
             history: History::default(),
             scheduler: Scheduler::default(),
+            edits: Vec::new(),
         };
         let prehistory_events = u.run_prehistory(&mut biospheres);
         u.biospheres = biospheres;
@@ -210,11 +259,19 @@ impl Universe {
         match settings.scenario {
             Scenario::GardenWorld => u.seed_garden_world(),
             Scenario::Sol => u.seed_humanity(),
-            Scenario::Neighbourhood => {}
+            Scenario::SolarSystemLab => u.seed_present_earth(),
+            Scenario::Neighbourhood | Scenario::StarSystem | Scenario::EmptySystem => {}
         }
 
         u.scheduler.add("biosphere", start_time, STEP_SECONDS);
         u.scheduler.add("civilizations", start_time, SECONDS_PER_YEAR);
+        if let (Some(p), false) = (settings.physics, u.systems[0].is_dynamic()) {
+            u.systems[0].activate_dynamics(start_time, p);
+        }
+        u.ensure_environment_task();
+        if u.systems.iter().any(|s| s.is_dynamic()) {
+            u.step_environment(start_time);
+        }
         u
     }
 
@@ -227,11 +284,15 @@ impl Universe {
         let mult = life_mult(&self.settings);
         let start = self.start_time;
         let skip_earth = self.settings.scenario == Scenario::Sol;
+        // The real-data lab starts from observations: no simulated prehistory anywhere (no
+        // invented life on Mars); Earth's present biosphere is set from what we know.
+        let skip_all = self.settings.scenario == Scenario::SolarSystemLab || !self.settings.systems.life;
         let systems = &self.systems;
 
         let jobs: Vec<(usize, Biosphere, StarSystem)> = biospheres
             .iter()
             .enumerate()
+            .filter(|_| !skip_all)
             .filter(|(_, bio)| !(skip_earth && bio.system == 0 && systems[0].bodies[bio.body as usize].name == "Earth"))
             .map(|(i, bio)| (i, bio.clone(), systems[bio.system as usize].clone()))
             .collect();
@@ -302,6 +363,24 @@ impl Universe {
         bio.habitability = hab;
         refresh_derived_resources(&mut self.systems[sys_idx].bodies[b], bio.vegetated());
         self.history.push(Event { time: t, category: Category::Life, importance: 4, title: format!("{name} is a living world"), detail: "Forests, oceans and complex animal life cover the planet.".into(), system: Some(0), body: Some(b as u32), civ: None });
+    }
+
+    /// Earth today: a mature biosphere (the civilization model does not yet start from the
+    /// present day; that arrives with the consequence-pipeline milestone).
+    fn seed_present_earth(&mut self) {
+        let t = self.start_time;
+        let Some(earth) = self.systems[0].find_body("Earth") else { return };
+        let Some(bi) = self.biospheres.iter().position(|b| b.system == 0 && b.body as usize == earth) else { return };
+        let bio = &mut self.biospheres[bi];
+        bio.stage = Stage::ComplexEcosystems;
+        bio.stage_since = -541.0 * SECONDS_PER_MYR;
+        bio.photosynthesis_since = Some(-2.7 * SECONDS_PER_GYR);
+        bio.biomass = 1.0;
+        bio.biodiversity = 0.9;
+        bio.land_life_myr = 470.0;
+        refresh_derived_resources(&mut self.systems[0].bodies[earth], true);
+        let hab = assess(&self.systems[0], earth, t);
+        self.biospheres[bi].habitability = hab;
     }
 
     fn seed_humanity(&mut self) {
@@ -390,7 +469,7 @@ impl Universe {
         }
     }
     pub fn gregorian(&self) -> bool {
-        self.settings.scenario == Scenario::Sol
+        matches!(self.settings.scenario, Scenario::Sol | Scenario::SolarSystemLab)
     }
     pub fn date_label(&self) -> String {
         format_date(self.time, self.start_time, self.gregorian())
@@ -409,17 +488,29 @@ impl Universe {
     ///   viewer can slow down for milestones.
     pub fn advance_to(&mut self, target: f64, budget: Option<Duration>, stop_at_importance: Option<u8>) -> AdvanceReport {
         let started = Instant::now();
+        let deadline = budget.map(|b| started + b);
         let mut report = AdvanceReport::default();
         let history_len = self.history.events.len();
         while let Some((task, due)) = self.scheduler.next() {
             if due > target {
                 break;
             }
+            // Dynamic systems must be at `due` before anything reads their state.
+            if !self.advance_physics(due, deadline) {
+                report.lagging = true;
+                report.cpu_time = started.elapsed();
+                return report;
+            }
             let k = self.scheduler.tasks[task].steps;
             let mut skip = None;
             match task {
-                TASK_BIOSPHERE => self.step_biospheres(due, k),
-                TASK_CIV => skip = Some(self.step_civs(due, k)),
+                TASK_BIOSPHERE => {
+                    if self.settings.systems.life {
+                        self.step_biospheres(due, k)
+                    }
+                }
+                TASK_CIV => skip = Some(if self.settings.systems.civilization { self.step_civs(due, k) } else { k + 1_000_000 }),
+                TASK_ENV => self.step_environment(due),
                 _ => {}
             }
             self.scheduler.complete(task);
@@ -443,9 +534,49 @@ impl Universe {
                 }
             }
         }
+        if !self.advance_physics(target, deadline) {
+            report.lagging = true;
+            report.cpu_time = started.elapsed();
+            return report;
+        }
         self.time = self.time.max(target);
         report.cpu_time = started.elapsed();
         report
+    }
+
+    /// Integrate every dynamic system up to `to`, applying collision consequences on the
+    /// way. Returns false if the deadline stopped it first (the clock then stays at the
+    /// earliest state reached, so nothing is skipped).
+    fn advance_physics(&mut self, to: f64, deadline: Option<Instant>) -> bool {
+        let mut all = true;
+        for s in 0..self.systems.len() {
+            if !self.systems[s].is_dynamic() {
+                continue;
+            }
+            loop {
+                let mut contacts = Vec::new();
+                let reached = self.systems[s].advance_dynamics(to, deadline, &mut contacts);
+                let had = !contacts.is_empty();
+                for c in contacts {
+                    self.on_contact(s, c);
+                }
+                self.apply_pending_contacts(s);
+                if reached {
+                    break;
+                }
+                if !had {
+                    all = false;
+                    break;
+                }
+            }
+        }
+        if !all {
+            let reached = self.systems.iter().filter_map(|s| s.dynamics.as_ref()).map(|d| d.time()).fold(f64::INFINITY, f64::min);
+            if reached.is_finite() {
+                self.time = self.time.max(reached.min(to));
+            }
+        }
+        all
     }
 
     pub fn advance_by(&mut self, dt: f64) -> AdvanceReport {
@@ -458,6 +589,9 @@ impl Universe {
         let mut new_intelligence = Vec::new();
         for bi in 0..self.biospheres.len() {
             let (s, b) = (self.biospheres[bi].system as usize, self.biospheres[bi].body as usize);
+            if !self.systems[s].bodies[b].exists() {
+                continue;
+            }
             if k % 100 == 0 {
                 crate::planet::environment::carbon_cycle(&mut self.systems[s].bodies[b], 1.0);
                 refresh_climate(&mut self.systems[s], b, t);

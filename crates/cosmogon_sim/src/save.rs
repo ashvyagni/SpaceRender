@@ -17,11 +17,20 @@ use thiserror::Error;
 use crate::universe::Universe;
 
 pub const FORMAT: &str = "cosmogon-save";
-pub const CURRENT_VERSION: u32 = 1;
+pub const CURRENT_VERSION: u32 = 2;
+/// Version of the physics engine (integrator and collision model) recorded in saves.
+pub const PHYSICS_ENGINE: &str = "nbody-yoshida4/1";
 pub const EXTENSION: &str = "cosmo";
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` save to version `i + 2`.
-const MIGRATIONS: &[fn(&mut Value) -> Result<(), SaveError>] = &[];
+const MIGRATIONS: &[fn(&mut Value) -> Result<(), SaveError>] = &[v1_to_v2];
+
+/// v2 (0.4) adds sandbox state — N-body dynamics, provenance, object classes, removals,
+/// impacts and the edit journal. Every new field has a default, so v1 data is valid v2
+/// data unchanged: old universes load with analytic orbits, exactly as before.
+fn v1_to_v2(_v: &mut Value) -> Result<(), SaveError> {
+    Ok(())
+}
 
 #[derive(Debug, Error)]
 pub enum SaveError {
@@ -48,6 +57,15 @@ pub struct SaveHeader {
     pub scenario: String,
     pub date: String,
     pub civilizations: u32,
+    /// Integrator / collision model version (reproducibility).
+    #[serde(default)]
+    pub physics_engine: String,
+    /// Datasets (id → version) this universe was built from.
+    #[serde(default)]
+    pub data_versions: std::collections::BTreeMap<String, String>,
+    /// Simulation time (s since J2000).
+    #[serde(default)]
+    pub sim_time: f64,
 }
 
 #[derive(Serialize)]
@@ -72,7 +90,27 @@ pub fn header_for(u: &Universe, name: &str) -> SaveHeader {
         scenario: u.settings.scenario.label().into(),
         date: u.date_label(),
         civilizations: u.civs.iter().filter(|c| c.is_alive()).count() as u32,
+        physics_engine: PHYSICS_ENGINE.into(),
+        data_versions: data_versions(u),
+        sim_time: u.time,
     }
+}
+
+/// The external datasets a universe depends on.
+pub fn data_versions(u: &Universe) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    let sol = u.systems.iter().any(|s| s.bodies.iter().any(|b| b.real));
+    if sol {
+        m.insert("nasa-planetary-fact-sheets".into(), "sol.toml@1".into());
+    }
+    if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.provenance.source.contains("Horizons"))) {
+        let d = crate::astro::horizons::Dataset::embedded();
+        m.insert("jpl-horizons-sol".into(), format!("{} (epoch {})", d.dataset.version, d.dataset.epoch));
+    }
+    if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.elevation_data.is_some())) {
+        m.insert("noaa-etopo5-earth".into(), "1".into());
+    }
+    m
 }
 
 pub fn to_json(u: &Universe, name: &str) -> Result<String, SaveError> {
@@ -149,6 +187,16 @@ mod tests {
     }
 
     #[test]
+    fn version_1_saves_still_load() {
+        let u = Universe::new(UniverseSettings { seed: 9, scenario: Scenario::GardenWorld, system_count: 3, ..Default::default() });
+        let json = to_json(&u, "old").unwrap().replace(&format!("\"version\":{CURRENT_VERSION}"), "\"version\":1");
+        assert!(json.contains("\"version\":1"));
+        let back = from_json(&json).unwrap();
+        assert_eq!(back, u);
+        assert!(back.systems.iter().all(|s| !s.is_dynamic()));
+    }
+
+    #[test]
     fn rejects_foreign_and_future_files() {
         assert!(matches!(from_json(r#"{"hello":1}"#), Err(SaveError::NotASave)));
         let future = format!(r#"{{"header":{{"format":"{FORMAT}","version":99}},"universe":{{}}}}"#);
@@ -181,5 +229,5 @@ mod golden {
         assert_eq!(fp, GOLDEN, "universe fingerprint changed: {fp:#018x}");
     }
 
-    const GOLDEN: u64 = 0x702a_c01d_1fea_eb34;
+    const GOLDEN: u64 = 0x3038_60a1_bd97_4fba;
 }

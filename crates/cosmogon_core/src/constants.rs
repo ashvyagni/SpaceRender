@@ -4,17 +4,20 @@ pub const G: f64 = 6.67430e-11;
 /// Speed of light in vacuum (m/s)
 pub const C: f64 = 2.99792458e8;
 
-/// Astronomical Unit (meters)
-pub const AU: f64 = 1.496e11;
+/// Astronomical unit (m), IAU 2012 Resolution B2 (exact).
+pub const AU: f64 = 1.495_978_707e11;
 
-/// Parsec (meters)
-pub const PARSEC: f64 = 3.086e16;
+/// Parsec (m), IAU 2015 Resolution B2 (648000/π AU).
+pub const PARSEC: f64 = 3.085_677_581_491_367e16;
 
-/// Light-year (meters)
-pub const LIGHT_YEAR: f64 = 9.461e15;
+/// Light-year (m): c × Julian year.
+pub const LIGHT_YEAR: f64 = 9.460_730_472_580_8e15;
 
-/// Solar mass (kg)
-pub const SOLAR_MASS: f64 = 1.989e30;
+/// Nominal solar mass parameter GM☉ (m³/s²), IAU 2015 Resolution B3.
+pub const GM_SUN: f64 = 1.327_124_4e20;
+
+/// Solar mass (kg) = GM☉ / G (consistent with [`G`], so N-body orbits use the exact GM☉).
+pub const SOLAR_MASS: f64 = GM_SUN / G;
 
 /// Solar radius (meters)
 pub const SOLAR_RADIUS: f64 = 6.957e8;
@@ -25,8 +28,8 @@ pub const SOLAR_LUMINOSITY: f64 = 3.828e26;
 /// Solar effective temperature (Kelvin)
 pub const SOLAR_TEMPERATURE: f64 = 5778.0;
 
-/// Earth mass (kg)
-pub const EARTH_MASS: f64 = 5.972e24;
+/// Earth mass (kg) = GM⊕ / G with GM⊕ = 3.986004418e14 m³/s² (IERS 2010).
+pub const EARTH_MASS: f64 = 5.972_17e24;
 
 /// Earth radius (meters)
 pub const EARTH_RADIUS: f64 = 6.371e6;
@@ -37,8 +40,8 @@ pub const MOON_MASS: f64 = 7.342e22;
 /// Moon radius (meters)
 pub const MOON_RADIUS: f64 = 1.737e6;
 
-/// Jupiter mass (kg)
-pub const JUPITER_MASS: f64 = 1.898e27;
+/// Jupiter mass (kg), NASA planetary fact sheet.
+pub const JUPITER_MASS: f64 = 1.898_13e27;
 
 /// Jupiter radius (meters)
 pub const JUPITER_RADIUS: f64 = 6.9911e7;

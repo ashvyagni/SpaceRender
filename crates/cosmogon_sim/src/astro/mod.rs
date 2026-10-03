@@ -1,6 +1,9 @@
 //! The physical universe: stars, orbits, bodies, systems and their generation.
 
 pub mod body;
+pub mod dynamics;
+pub mod horizons;
+pub mod object;
 pub mod generate;
 pub mod orbit;
 pub mod sol;
@@ -8,16 +11,11 @@ pub mod star;
 pub mod system;
 
 pub use body::*;
+pub use object::{ObjectClass, Provenance, Quality};
 pub use orbit::Orbit;
 pub use star::Star;
 pub use system::*;
 
-/// Astronomical unit in metres (IAU 2012).
-pub const AU: f64 = 1.495_978_707e11;
-pub const LIGHT_YEAR: f64 = 9.460_730_472_580_8e15;
-pub const SOLAR_MASS: f64 = 1.988_92e30;
-pub const SOLAR_RADIUS: f64 = 6.957e8;
-pub const EARTH_MASS: f64 = 5.972_17e24;
-pub const EARTH_RADIUS: f64 = 6.371e6;
-pub const G: f64 = cosmogon_core::constants::G;
+// One set of physical constants for the whole project (see docs/DATA_SOURCES.md).
+pub use cosmogon_core::constants::{AU, EARTH_MASS, EARTH_RADIUS, G, GM_SUN, JUPITER_MASS, JUPITER_RADIUS, LIGHT_YEAR, SOLAR_MASS, SOLAR_RADIUS};
 pub const SPEED_OF_LIGHT: f64 = cosmogon_core::constants::C;

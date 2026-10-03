@@ -93,13 +93,51 @@ pub fn format_date(t: f64, start: f64, gregorian: bool) -> String {
         if year >= 1.0 {
             let y = year.floor();
             let doy = ((year - y) * 365.25).floor() + 1.0;
-            format!("{} CE, day {:.0}", group_digits(y), doy)
+            format!("{} CE, day {:.0}", year_digits(y), doy)
         } else {
-            format!("{} BCE", group_digits((1.0 - year).floor()))
+            format!("{} BCE", year_digits((1.0 - year).floor()))
         }
     } else {
         format!("Year {}", group_digits(years(t - start).floor()))
     }
+}
+
+/// Years are written without separators below 10 000 (2026, not 2,026).
+fn year_digits(y: f64) -> String {
+    if y.abs() < 10_000.0 {
+        format!("{y:.0}")
+    } else {
+        group_digits(y)
+    }
+}
+
+/// Proleptic Gregorian calendar date of `t` (TDB seconds since J2000.0):
+/// (year — astronomical numbering, 0 = 1 BCE — month 1–12, day 1–31, seconds of day).
+pub fn civil_date(t: f64) -> (i64, u32, u32, f64) {
+    let jd = 2_451_545.0 + t / SECONDS_PER_DAY;
+    let z = (jd + 0.5).floor();
+    let sod = (jd + 0.5 - z) * SECONDS_PER_DAY;
+    let z = z as i64;
+    // Richards (2013), "Calendars", Explanatory Supplement to the Astronomical Almanac.
+    let a = z + 32_044;
+    let b = (4 * a + 3).div_euclid(146_097);
+    let c = a - (146_097 * b).div_euclid(4);
+    let d = (4 * c + 3).div_euclid(1461);
+    let e = c - (1461 * d).div_euclid(4);
+    let m = (5 * e + 2).div_euclid(153);
+    let day = e - (153 * m + 2).div_euclid(5) + 1;
+    let month = m + 3 - 12 * (m / 10);
+    let year = 100 * b + d - 4800 + m / 10;
+    (year, month as u32, day as u32, sod)
+}
+
+/// "1 Jan 2026 · 14:32" — a full date and time for sandbox clocks.
+pub fn format_datetime(t: f64) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let (y, m, d, sod) = civil_date(t);
+    let (h, min) = ((sod / 3600.0).floor() as u32, ((sod % 3600.0) / 60.0).floor() as u32);
+    let year = if y >= 1 { year_digits(y as f64) } else { format!("{} BCE", year_digits((1 - y) as f64)) };
+    format!("{d} {} {year} · {h:02}:{min:02}", MONTHS[(m - 1) as usize])
 }
 
 #[cfg(test)]
@@ -122,7 +160,12 @@ mod tests {
 
     #[test]
     fn gregorian_dates() {
-        assert!(format_date(0.0, 0.0, true).starts_with("2,000 CE"));
+        assert!(format_date(0.0, 0.0, true).starts_with("2000 CE"));
+        assert_eq!(civil_date(0.0), (2000, 1, 1, 43_200.0));
+        // 2026-01-01 00:00 TDB = JD 2461041.5
+        let t = (2_461_041.5 - 2_451_545.0) * SECONDS_PER_DAY;
+        assert_eq!(format_datetime(t), "1 Jan 2026 · 00:00");
+        assert_eq!(civil_date(t + 59.0 * SECONDS_PER_DAY).1, 3); // 1 March (2026 is not a leap year)
         assert!(format_date(-200_000.0 * SECONDS_PER_YEAR, 0.0, true).ends_with("BCE"));
     }
 }

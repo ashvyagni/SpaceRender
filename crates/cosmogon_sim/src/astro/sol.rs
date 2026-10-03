@@ -157,6 +157,11 @@ pub fn sol_system() -> StarSystem {
             interglacial_fraction: 1.0,
             glacial_phase_years: 0.0,
             glacial_until_years: sb.glacial_until_years,
+            class: None,
+            provenance: Default::default(),
+            removed: None,
+            impacts: Vec::new(),
+            impact_winter: None,
             elevation_data: match sb.elevation_data.as_deref() {
                 Some("earth") => Some(crate::planet::terrain::ElevationData::Earth),
                 Some(other) => panic!("unknown elevation_data {other}"),
@@ -194,6 +199,8 @@ pub fn sol_system() -> StarSystem {
             super::Belt { name: "Main Belt".into(), inner: 2.2 * AU, outer: 3.3 * AU, icy: false },
             super::Belt { name: "Kuiper Belt".into(), inner: 30.0 * AU, outer: 50.0 * AU, icy: true },
         ],
+        dynamics: None,
+        pending_contacts: Vec::new(),
     };
 
     for i in 0..system.bodies.len() {

@@ -72,6 +72,37 @@ impl Orbit {
         )
     }
 
+    /// Position and velocity relative to the primary at time `t`. The mean motion uses
+    /// `mu_anomaly` (the parameter the analytic orbit was propagated with); the velocity uses
+    /// `mu_dynamic` (G·(m_parent + m_body), the two-body value an N-body run needs so the
+    /// semi-major axis is preserved).
+    pub fn state(&self, mu_anomaly: f64, mu_dynamic: f64, t: f64) -> (Vec3d, Vec3d) {
+        let m = self.mean_anomaly(mu_anomaly, t);
+        kepler::orbital_state_vectors(self.a, self.e, self.i, self.node, self.peri, m, mu_dynamic)
+    }
+
+    /// Osculating orbit from a relative state vector, with the mean anomaly referred to
+    /// t = 0 so that [`Orbit::position`] reproduces the state at time `t`. `None` if the
+    /// state is unbound (e ≥ 1) or degenerate.
+    pub fn from_state(rel_pos: Vec3d, rel_vel: Vec3d, mu: f64, t: f64) -> Option<Orbit> {
+        if mu <= 0.0 || rel_pos.length() == 0.0 {
+            return None;
+        }
+        let el = cosmogon_physics::orbital_elements::state_vectors_to_elements(rel_pos, rel_vel, mu);
+        if !el.is_bound() {
+            return None;
+        }
+        let n = (mu / el.semi_major_axis.powi(3)).sqrt();
+        Some(Orbit {
+            a: el.semi_major_axis,
+            e: el.eccentricity,
+            i: el.inclination,
+            node: el.longitude_ascending,
+            peri: el.argument_perihelion,
+            m0: (el.mean_anomaly - n * t).rem_euclid(std::f64::consts::TAU),
+        })
+    }
+
     /// Points along one full orbit (for drawing), relative to the primary.
     pub fn path(&self, segments: usize) -> Vec<Vec3d> {
         (0..=segments)

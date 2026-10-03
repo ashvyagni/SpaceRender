@@ -1,5 +1,7 @@
 //! Star systems and positions.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use serde::{Deserialize, Serialize};
 
 use super::{Body, Orbit, Star};
@@ -30,6 +32,13 @@ pub struct StarSystem {
     pub companion: Option<Companion>,
     pub bodies: Vec<Body>,
     pub belts: Vec<Belt>,
+    /// N-body state when the system is dynamic (sandbox); `None` = analytic Kepler orbits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<super::dynamics::Dynamics>,
+    /// Collisions found while syncing for an edit, waiting for the universe to apply
+    /// their consequences (transient).
+    #[serde(skip)]
+    pub pending_contacts: Vec<super::dynamics::ContactEvent>,
 }
 
 impl StarSystem {
@@ -41,8 +50,12 @@ impl StarSystem {
         }
     }
 
-    /// Position of `body` relative to the primary star at time `t`.
+    /// Position of `body` in the system frame at time `t` (analytic mode: relative to the
+    /// primary star, which sits at the origin; dynamic mode: relative to the barycentre).
     pub fn body_local_position(&self, body: usize, t: f64) -> Vec3d {
+        if self.dynamics.is_some() {
+            return self.body_state(body, t).pos;
+        }
         let b = &self.bodies[body];
         let rel = b.orbit.position(self.parent_mu(body), t);
         match b.parent {
@@ -56,25 +69,61 @@ impl StarSystem {
         self.position + self.body_local_position(body, t)
     }
 
+    /// Absolute position of the primary star.
+    pub fn star_position(&self, t: f64) -> Vec3d {
+        self.position + self.star_local_position(t)
+    }
+
     pub fn companion_position(&self, t: f64) -> Option<Vec3d> {
+        if let Some(d) = &self.dynamics {
+            let acc = d.acc.get(1).copied().filter(|_| d.companion.is_some()).unwrap_or(Vec3d::ZERO);
+            let dt = t - d.time();
+            return d.companion.map(|c| self.position + c.pos + c.vel * dt + acc * (0.5 * dt * dt));
+        }
         self.companion.as_ref().map(|c| self.position + c.orbit.position(self.star.mu() + c.star.mu(), t))
     }
 
-    /// Distance from the primary star (m) of `body` (for moons, of their planet).
-    pub fn stellar_distance(&self, body: usize) -> f64 {
+    /// The planet (top-level body) that `body` belongs to.
+    pub fn top_level(&self, body: usize) -> usize {
         let mut idx = body;
         while let Some(p) = self.bodies[idx].parent {
             idx = p as usize;
         }
-        self.bodies[idx].orbit.a
+        idx
+    }
+
+    /// Effective distance from the primary star (m) for climate: the distance at which a
+    /// circular orbit receives the same *annual-mean* flux, `a·(1−e²)^¼` (for moons, that of
+    /// their planet). Dynamic systems use the current osculating orbit; unbound bodies
+    /// their instantaneous distance.
+    pub fn stellar_distance(&self, body: usize) -> f64 {
+        let idx = self.top_level(body);
+        let (a, e) = match &self.dynamics {
+            Some(d) => {
+                let el = self.osculating(idx, d.time());
+                if el.is_bound() {
+                    (el.semi_major_axis, el.eccentricity)
+                } else {
+                    let t = d.time();
+                    return (self.body_local_position(idx, t) - self.star_local_position(t)).length();
+                }
+            }
+            None => (self.bodies[idx].orbit.a, self.bodies[idx].orbit.e),
+        };
+        a * (1.0 - e * e).max(0.0).dpowf(0.25)
     }
 
     pub fn moons_of(&self, body: usize) -> impl Iterator<Item = usize> + '_ {
-        self.bodies.iter().enumerate().filter(move |(_, b)| b.parent == Some(body as u32)).map(|(i, _)| i)
+        self.bodies.iter().enumerate().filter(move |(_, b)| b.parent == Some(body as u32) && b.exists()).map(|(i, _)| i)
     }
 
     pub fn planets(&self) -> impl Iterator<Item = usize> + '_ {
-        self.bodies.iter().enumerate().filter(|(_, b)| b.parent.is_none()).map(|(i, _)| i)
+        self.bodies.iter().enumerate().filter(|(_, b)| b.parent.is_none() && b.exists()).map(|(i, _)| i)
+    }
+
+    /// Indices of bodies that still exist.
+    pub fn existing(&self) -> impl Iterator<Item = usize> + '_ {
+        self.bodies.iter().enumerate().filter(|(_, b)| b.exists()).map(|(i, _)| i)
     }
 
     pub fn find_body(&self, name: &str) -> Option<usize> {

@@ -6,4 +6,5 @@ pub mod gravity;
 pub mod integrators;
 pub mod kepler;
 pub mod lagrange;
+pub mod nbody;
 pub mod orbital_elements;

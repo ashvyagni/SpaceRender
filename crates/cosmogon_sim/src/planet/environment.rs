@@ -101,7 +101,9 @@ pub fn update_climate(body: &mut Body, star: &Star, t: f64, stellar_distance_m: 
         }
     }
     body.albedo = albedo;
-    body.temperature = temp;
+    // Impact winter: surface air cooling only (see `impact::ImpactWinter`).
+    let winter = body.impact_winter.map(|w| w.cooling_at(t)).unwrap_or(0.0);
+    body.temperature = temp - winter;
 }
 
 /// The carbonate–silicate cycle over `dt_myr` million years: on geologically active worlds

@@ -255,6 +255,36 @@ pub struct Body {
     /// For real bodies: glacial conditions persist until this time (years rel. J2000).
     #[serde(default)]
     pub glacial_until_years: Option<f64>,
+    /// Object class (None = inferred from kind, parent and mass; see `object::infer_class`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<super::ObjectClass>,
+    /// Where the values come from and how much to trust each one.
+    #[serde(default, skip_serializing_if = "super::Provenance::is_empty")]
+    pub provenance: super::Provenance,
+    /// Set when the body no longer exists (deleted, merged, destroyed). Bodies are never
+    /// removed from storage so that every index-based reference stays valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed: Option<Removal>,
+    /// Impacts this body has received.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub impacts: Vec<crate::impact::ImpactRecord>,
+    /// Transient surface cooling after a large impact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact_winter: Option<crate::impact::ImpactWinter>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum RemovalCause {
+    /// Deleted by the user.
+    Deleted,
+    /// Collided with and merged into this body (index in the same system; `None` = the star).
+    MergedInto(Option<u32>),
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Removal {
+    pub time: f64,
+    pub cause: RemovalCause,
 }
 
 impl Body {
@@ -313,6 +343,14 @@ impl Body {
         }
         let phase = ((years - self.glacial_phase_years) / self.glacial_cycle_years).rem_euclid(1.0);
         if phase < self.interglacial_fraction { 1.0 } else { 0.3 }
+    }
+
+    pub fn exists(&self) -> bool {
+        self.removed.is_none()
+    }
+
+    pub fn class(&self) -> super::ObjectClass {
+        super::object::infer_class(self)
     }
 
     pub fn is_moon(&self) -> bool {

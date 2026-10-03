@@ -4,35 +4,69 @@ use cosmogon_core::math::Vec3d;
 use cosmogon_core::constants;
 
 /// Classical Keplerian orbital elements derived from Cartesian state vectors.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OrbitalElements {
-    /// Semi-major axis a (meters).
+    /// Semi-major axis a (meters). Negative for hyperbolic orbits, infinite if parabolic.
     pub semi_major_axis: f64,
     /// Eccentricity e (dimensionless).
     pub eccentricity: f64,
-    /// Inclination i (radians).
+    /// Inclination i (radians), 0..π.
     pub inclination: f64,
-    /// Longitude of ascending node Ω (radians).
+    /// Longitude of ascending node Ω (radians). 0 for equatorial orbits.
     pub longitude_ascending: f64,
-    /// Argument of perihelion ω (radians).
+    /// Argument of periapsis ω (radians). For equatorial orbits this is measured from the
+    /// reference x-axis (so Ω + ω is the longitude of periapsis); 0 for circular orbits.
     pub argument_perihelion: f64,
-    /// True anomaly ν (radians).
+    /// True anomaly ν (radians). For circular orbits: argument of latitude (inclined) or
+    /// true longitude (equatorial).
     pub true_anomaly: f64,
+    /// Mean anomaly M (radians); hyperbolic mean anomaly for e > 1.
+    pub mean_anomaly: f64,
+}
+
+impl OrbitalElements {
+    pub fn is_bound(&self) -> bool {
+        self.eccentricity < 1.0 && self.semi_major_axis > 0.0 && self.semi_major_axis.is_finite()
+    }
+    pub fn periapsis(&self) -> f64 {
+        if self.semi_major_axis.is_finite() {
+            self.semi_major_axis * (1.0 - self.eccentricity)
+        } else {
+            f64::NAN
+        }
+    }
+    pub fn apoapsis(&self) -> f64 {
+        if self.is_bound() {
+            self.semi_major_axis * (1.0 + self.eccentricity)
+        } else {
+            f64::INFINITY
+        }
+    }
+}
+
+/// Tolerance below which an orbit counts as circular / equatorial.
+const SMALL: f64 = 1e-11;
+
+/// Mean anomaly from the true anomaly.
+pub fn true_to_mean_anomaly(nu: f64, e: f64) -> f64 {
+    if e < 1.0 {
+        let ecc = 2.0 * ((1.0 - e).sqrt() * (nu * 0.5).dsin()).datan2((1.0 + e).sqrt() * (nu * 0.5).dcos());
+        (ecc - e * ecc.dsin()).rem_euclid(constants::TWO_PI)
+    } else if e > 1.0 {
+        let x = ((e - 1.0) / (e + 1.0)).sqrt() * (nu * 0.5).dtan();
+        // atanh(x) = ½ ln((1+x)/(1−x))
+        let h = 2.0 * 0.5 * ((1.0 + x) / (1.0 - x)).dln();
+        e * h.sinh() - h
+    } else {
+        let d = (nu * 0.5).dtan();
+        d + d * d * d / 3.0
+    }
 }
 
 /// Convert position and velocity state vectors to classical orbital elements.
 ///
-/// Given an inertial-frame position `r` and velocity `v` relative to a central
-/// body with gravitational parameter `mu`, this function computes the six
-/// classical orbital elements.
-///
-/// # Arguments
-/// * `r` – position vector (meters)
-/// * `v` – velocity vector (m/s)
-/// * `mu` – gravitational parameter μ = GM (m³/s²)
-///
-/// # Returns
-/// [`OrbitalElements`] struct with all six elements.
+/// Robust for circular, equatorial, retrograde and hyperbolic orbits: every angle comes
+/// from `atan2` of projections, so no branch loses a quadrant.
 ///
 /// # Panics
 /// Panics if `mu` is zero or negative.
@@ -40,99 +74,37 @@ pub fn state_vectors_to_elements(r: Vec3d, v: Vec3d, mu: f64) -> OrbitalElements
     assert!(mu > 0.0, "gravitational parameter must be positive");
 
     let r_mag = r.length();
-    let v_mag = v.length();
-
-    // Specific angular momentum: h = r × v
     let h = r.cross(v);
-    let h_mag = h.length();
+    let h_mag = h.length().max(f64::MIN_POSITIVE);
+    let h_hat = h / h_mag;
 
-    // Node vector: n = k × h (k = [0, 0, 1])
+    // Node vector n = k × h.
     let n = Vec3d::new(-h.y, h.x, 0.0);
     let n_mag = n.length();
+    let equatorial = n_mag <= SMALL * h_mag;
 
-    // Eccentricity vector: e = (v × h) / μ - r̂
-    let e_vec = {
-        let v_cross_h = v.cross(h);
-        Vec3d::new(
-            v_cross_h.x / mu - r.x / r_mag,
-            v_cross_h.y / mu - r.y / r_mag,
-            v_cross_h.z / mu - r.z / r_mag,
-        )
-    };
-    let eccentricity = e_vec.length();
+    // Eccentricity vector e = (v × h)/μ − r̂.
+    let e_vec = v.cross(h) / mu - r / r_mag;
+    let e = e_vec.length();
+    let circular = e <= SMALL;
 
-    // Specific energy → semi-major axis
-    let energy = v_mag * v_mag * 0.5 - mu / r_mag;
-    let semi_major_axis = if eccentricity < 1.0 - 1e-12 {
-        // Elliptical
-        -mu / (2.0 * energy)
-    } else if (eccentricity - 1.0).abs() < 1e-12 {
-        // Parabolic — semi-major axis is infinite; use periapsis distance
-        f64::INFINITY
-    } else {
-        // Hyperbolic
-        -mu / (2.0 * energy) // negative semi-major axis by convention
-    };
+    let energy = 0.5 * v.length_squared() - mu / r_mag;
+    let semi_major_axis = if (e - 1.0).abs() <= SMALL { f64::INFINITY } else { -mu / (2.0 * energy) };
 
-    // Inclination
-    let inclination = (h.z / h_mag).clamp(-1.0, 1.0).dacos();
+    let inclination = (h.x * h.x + h.y * h.y).sqrt().datan2(h.z);
+    let longitude_ascending = if equatorial { 0.0 } else { n.y.datan2(n.x).rem_euclid(constants::TWO_PI) };
 
-    // Longitude of ascending node
-    let longitude_ascending = if n_mag > 1e-15 {
-        let mut raan = n.x.datan2(n.y);
-        if raan < 0.0 {
-            raan += constants::TWO_PI;
-        }
-        raan
-    } else {
-        0.0
-    };
+    // Angle of `a` measured from reference direction `from` in the orbital plane.
+    let angle = |from: Vec3d, a: Vec3d| from.cross(a).dot(h_hat).datan2(from.dot(a));
+    // In-plane reference: the ascending node, or the x-axis seen in the orbit's own sense.
+    let reference = if equatorial { Vec3d::new(1.0, 0.0, 0.0) } else { n / n_mag };
+    let sense = |x: f64| x;
 
-    // Argument of perihelion
-    let argument_perihelion = if n_mag > 1e-15 && eccentricity > 1e-15 {
-        let aop = n.dot(e_vec) / (n_mag * eccentricity);
-        let aop = aop.clamp(-1.0, 1.0).dacos();
-        if e_vec.z < 0.0 {
-            constants::TWO_PI - aop
-        } else {
-            aop
-        }
-    } else {
-        0.0
-    };
+    let argument_perihelion = if circular { 0.0 } else { sense(angle(reference, e_vec)).rem_euclid(constants::TWO_PI) };
+    let true_anomaly = if circular { sense(angle(reference, r)) } else { angle(e_vec, r) }.rem_euclid(constants::TWO_PI);
+    let mean_anomaly = true_to_mean_anomaly(true_anomaly, e);
 
-    // True anomaly
-    let true_anomaly = if eccentricity > 1e-15 {
-        let ta = e_vec.dot(r) / (eccentricity * r_mag);
-        let ta = ta.clamp(-1.0, 1.0).dacos();
-        if r.dot(v) < 0.0 {
-            constants::TWO_PI - ta
-        } else {
-            ta
-        }
-    } else {
-        // Circular orbit — use position angle relative to ascending node
-        if n_mag > 1e-15 {
-            let cos_ta = n.dot(r) / (n_mag * r_mag);
-            let sin_ta = h.dot(n.cross(r)) / (h_mag * n_mag * r_mag);
-            let mut ta = cos_ta.clamp(-1.0, 1.0).dacos();
-            if sin_ta < 0.0 {
-                ta = constants::TWO_PI - ta;
-            }
-            ta
-        } else {
-            0.0
-        }
-    };
-
-    OrbitalElements {
-        semi_major_axis,
-        eccentricity,
-        inclination,
-        longitude_ascending,
-        argument_perihelion,
-        true_anomaly,
-    }
+    OrbitalElements { semi_major_axis, eccentricity: e, inclination, longitude_ascending, argument_perihelion, true_anomaly, mean_anomaly }
 }
 
 /// Convert classical orbital elements back to position and velocity state vectors.
@@ -293,6 +265,41 @@ mod tests {
         assert!(approx_eq(pos2.z, pos.z));
         assert!(approx_eq(vel2.x, vel.x));
         assert!(approx_eq(vel2.y, vel.y));
+    }
+
+    fn assert_roundtrip(pos: Vec3d, vel: Vec3d, mu: f64) {
+        let el = state_vectors_to_elements(pos, vel, mu);
+        let (p2, v2) = elements_to_state_vectors(el, mu);
+        let scale_r = pos.length();
+        let scale_v = vel.length();
+        assert!((p2 - pos).length() / scale_r < 1e-10, "{el:?}: {p2:?} vs {pos:?}");
+        assert!((v2 - vel).length() / scale_v < 1e-10, "{el:?}: {v2:?} vs {vel:?}");
+    }
+
+    #[test]
+    fn roundtrip_inclined_eccentric_retrograde_equatorial() {
+        let mu = 1.327e20;
+        let r = Vec3d::new(1.1e11, -4.0e10, 2.0e10);
+        assert_roundtrip(r, Vec3d::new(9_000.0, 31_000.0, 4_000.0), mu); // inclined, eccentric
+        assert_roundtrip(r, Vec3d::new(-9_000.0, -31_000.0, 4_000.0), mu); // retrograde
+        assert_roundtrip(Vec3d::new(1.5e11, 2.0e10, 0.0), Vec3d::new(-3_000.0, 33_000.0, 0.0), mu); // prograde equatorial
+        assert_roundtrip(Vec3d::new(1.5e11, 2.0e10, 0.0), Vec3d::new(3_000.0, -33_000.0, 0.0), mu); // retrograde equatorial
+    }
+
+    #[test]
+    fn node_and_mean_anomaly_are_correct() {
+        // Build from known elements and recover them.
+        let mu = 3.986e14;
+        let el = OrbitalElements { semi_major_axis: 2.4e7, eccentricity: 0.3, inclination: 0.5, longitude_ascending: 1.2, argument_perihelion: 2.1, true_anomaly: 0.7, mean_anomaly: 0.0 };
+        let (p, v) = elements_to_state_vectors(el, mu);
+        let back = state_vectors_to_elements(p, v, mu);
+        assert!((back.longitude_ascending - 1.2).abs() < 1e-9, "{back:?}");
+        assert!((back.argument_perihelion - 2.1).abs() < 1e-9);
+        assert!((back.true_anomaly - 0.7).abs() < 1e-9);
+        let m = true_to_mean_anomaly(0.7, 0.3);
+        let ecc = crate::kepler::solve_kepler(m, 0.3, 1e-14, 50);
+        assert!((crate::kepler::eccentric_to_true_anomaly(ecc, 0.3) - 0.7).abs() < 1e-9);
+        assert!((back.mean_anomaly - m).abs() < 1e-9);
     }
 
     #[test]

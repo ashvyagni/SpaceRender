@@ -43,6 +43,9 @@ impl Args {
                     a.new = Some(match val().as_str() {
                         "garden" => Scenario::GardenWorld,
                         "sol" => Scenario::Sol,
+                        "lab" => Scenario::SolarSystemLab,
+                        "system" => Scenario::StarSystem,
+                        "empty" => Scenario::EmptySystem,
                         _ => Scenario::Neighbourhood,
                     })
                 }

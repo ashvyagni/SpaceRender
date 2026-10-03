@@ -47,6 +47,9 @@ fn parse() -> Args {
                     "neighbourhood" | "neighborhood" => Scenario::Neighbourhood,
                     "garden" => Scenario::GardenWorld,
                     "sol" => Scenario::Sol,
+                    "lab" => Scenario::SolarSystemLab,
+                    "system" => Scenario::StarSystem,
+                    "empty" => Scenario::EmptySystem,
                     s => panic!("unknown scenario {s}"),
                 }
             }

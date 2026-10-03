@@ -22,7 +22,12 @@ const STELLAR_DENSITY_PER_LY3: f64 = 0.004;
 
 pub fn generate_systems(settings: &UniverseSettings) -> Vec<StarSystem> {
     let seed = settings.seed;
-    let n = settings.system_count.max(1) as usize;
+    // Real-data and build-your-own templates contain only their own system: procedural
+    // neighbours would masquerade as real stars.
+    let n = match settings.scenario {
+        Scenario::SolarSystemLab | Scenario::StarSystem | Scenario::EmptySystem => 1,
+        _ => settings.system_count.max(1) as usize,
+    };
     let radius_ly = (n as f64 / (4.0 / 3.0 * std::f64::consts::PI * STELLAR_DENSITY_PER_LY3)).dcbrt();
 
     let mut systems = Vec::with_capacity(n);
@@ -39,9 +44,14 @@ pub fn generate_systems(settings: &UniverseSettings) -> Vec<StarSystem> {
             let ph = (2.0 * w - 1.0).dacos();
             Vec3d::new(r * ph.dsin() * th.dcos(), r * ph.dsin() * th.dsin(), 0.6 * r * ph.dcos())
         };
-        if home && settings.scenario == Scenario::Sol {
+        if home && matches!(settings.scenario, Scenario::Sol | Scenario::SolarSystemLab | Scenario::EmptySystem) {
             let mut sol = sol::sol_system();
             sol.id = 0;
+            if settings.scenario == Scenario::EmptySystem {
+                sol.name = "New system".into();
+                sol.bodies.clear();
+                sol.belts.clear();
+            }
             systems.push(sol);
             continue;
         }
@@ -97,7 +107,7 @@ pub fn generate_system(settings: &UniverseSettings, id: u32, position: Vec3d, ga
     };
     let outer_limit_au = companion.as_ref().map(|c| c.orbit.periapsis() / AU / 3.5).unwrap_or(80.0) * mass.sqrt().max(0.5);
 
-    let mut system = StarSystem { id, name, position, star, companion, bodies: Vec::new(), belts: Vec::new() };
+    let mut system = StarSystem { id, name, position, star, companion, bodies: Vec::new(), belts: Vec::new(), dynamics: None, pending_contacts: Vec::new() };
     generate_planets(settings, &mut system, outer_limit_au, garden, age_gyr);
     system
 }
@@ -415,6 +425,11 @@ fn make_body(
         interglacial_fraction: 1.0,
         glacial_phase_years: 0.0,
         glacial_until_years: None,
+        class: None,
+        provenance: Default::default(),
+        removed: None,
+        impacts: Vec::new(),
+        impact_winter: None,
         elevation_data: None,
     };
     update_climate(&mut body, star, 0.0, stellar_a_au * AU);
