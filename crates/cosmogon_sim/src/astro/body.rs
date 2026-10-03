@@ -279,6 +279,10 @@ pub enum RemovalCause {
     Deleted,
     /// Collided with and merged into this body (index in the same system; `None` = the star).
     MergedInto(Option<u32>),
+    /// Destroyed by a supernova.
+    Vaporised,
+    /// Left the system on an unbound orbit.
+    Ejected,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

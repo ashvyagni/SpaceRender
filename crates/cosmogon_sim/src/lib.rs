@@ -34,6 +34,7 @@ pub mod rng;
 pub mod sandbox;
 pub mod save;
 pub mod scheduler;
+pub mod stellar;
 pub mod time;
 pub mod universe;
 

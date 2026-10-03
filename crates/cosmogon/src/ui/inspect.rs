@@ -207,6 +207,8 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                         RemovalCause::Deleted => "Deleted".to_string(),
                         RemovalCause::MergedInto(Some(i)) => format!("Collided with {}", u.system(r.system).bodies[i as usize].name),
                         RemovalCause::MergedInto(None) => format!("Fell into {}", u.system(r.system).star.name),
+                        RemovalCause::Vaporised => "Vaporised by a supernova".to_string(),
+                        RemovalCause::Ejected => "Escaped the system".to_string(),
                     };
                     ui.colored_label(DANGER, format!("{how} — {}", format_date(rm.time, u.start_time, u.gregorian())));
                     return;

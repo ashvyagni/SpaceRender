@@ -39,6 +39,9 @@ pub struct StarSystem {
     /// their consequences (transient).
     #[serde(skip)]
     pub pending_contacts: Vec<super::dynamics::ContactEvent>,
+    /// Expanding shells of gas from dying stars.
+    #[serde(default)]
+    pub nebulae: Vec<crate::stellar::Nebula>,
 }
 
 impl StarSystem {

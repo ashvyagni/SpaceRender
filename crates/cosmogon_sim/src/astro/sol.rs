@@ -201,6 +201,7 @@ pub fn sol_system() -> StarSystem {
         ],
         dynamics: None,
         pending_contacts: Vec::new(),
+        nebulae: Vec::new(),
     };
 
     for i in 0..system.bodies.len() {

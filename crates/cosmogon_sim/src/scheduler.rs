@@ -22,6 +22,9 @@ impl Task {
     }
 }
 
+/// Period of a placeholder task that never runs (finite so saves stay valid JSON).
+pub const NEVER: f64 = 1.0e290;
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Scheduler {
     pub tasks: Vec<Task>,

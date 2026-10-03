@@ -618,6 +618,7 @@ impl Universe {
             sys.retune(t);
         }
         self.ensure_environment_task();
+        self.ensure_star_task();
         for j in affected {
             self.refresh_body_environment(s, j, t);
         }
@@ -949,11 +950,18 @@ impl Universe {
 
     /// Make sure the environment task exists once any system is dynamic.
     pub(crate) fn ensure_environment_task(&mut self) {
-        if self.systems.iter().any(|s| s.is_dynamic()) && self.scheduler.tasks.len() <= crate::universe::TASK_ENV {
-            while self.scheduler.tasks.len() < crate::universe::TASK_ENV {
-                self.scheduler.add("placeholder", self.time, f64::INFINITY);
-            }
+        if !self.systems.iter().any(|s| s.is_dynamic()) {
+            return;
+        }
+        let env = crate::universe::TASK_ENV;
+        while self.scheduler.tasks.len() < env {
+            self.scheduler.add("placeholder", self.time, crate::scheduler::NEVER);
+        }
+        if self.scheduler.tasks.len() == env {
             self.scheduler.add("environment", self.time, ENVIRONMENT_PERIOD);
+        } else if self.scheduler.tasks[env].period >= crate::scheduler::NEVER {
+            // A placeholder held the slot (another task registered after it).
+            self.scheduler.tasks[env] = crate::scheduler::Task { name: "environment".into(), origin: self.time, period: ENVIRONMENT_PERIOD, steps: 0 };
         }
     }
 }

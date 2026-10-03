@@ -124,7 +124,10 @@ pub fn from_json(s: &str) -> Result<Universe, SaveError> {
         step(&mut v)?;
     }
     let universe = v.get_mut("universe").map(Value::take).ok_or(SaveError::NotASave)?;
-    Ok(serde_json::from_value(universe)?)
+    let mut u: Universe = serde_json::from_value(universe)?;
+    // Tasks added by newer versions (stellar evolution) start running in older saves.
+    u.ensure_star_task();
+    Ok(u)
 }
 
 fn check_header(v: &Value) -> Result<u32, SaveError> {
@@ -229,5 +232,5 @@ mod golden {
         assert_eq!(fp, GOLDEN, "universe fingerprint changed: {fp:#018x}");
     }
 
-    const GOLDEN: u64 = 0x8094_860f_b438_e6ba;
+    const GOLDEN: u64 = 0xc5a8_4a33_07d7_683b;
 }

@@ -173,6 +173,9 @@ pub struct Universe {
     /// the experiment.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edits: Vec<crate::sandbox::EditRecord>,
+    /// Supernova radiation fronts still travelling between the stars.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blasts: Vec<crate::stellar::Blast>,
 }
 
 fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
@@ -238,6 +241,7 @@ impl Universe {
             history: History::default(),
             scheduler: Scheduler::default(),
             edits: Vec::new(),
+            blasts: Vec::new(),
         };
         let prehistory_events = u.run_prehistory(&mut biospheres);
         u.biospheres = biospheres;
@@ -274,6 +278,7 @@ impl Universe {
             u.systems[0].activate_dynamics(start_time, p);
         }
         u.ensure_environment_task();
+        u.ensure_star_task();
         if u.systems.iter().any(|s| s.is_dynamic()) {
             u.step_environment(start_time);
         }
@@ -508,6 +513,7 @@ impl Universe {
             }
             let k = self.scheduler.tasks[task].steps;
             let mut skip = None;
+            let mut star_skip = None;
             match task {
                 TASK_BIOSPHERE => {
                     if self.settings.systems.life {
@@ -516,11 +522,15 @@ impl Universe {
                 }
                 TASK_CIV => skip = Some(if self.settings.systems.civilization { self.step_civs(due, k) } else { k + 1_000_000 }),
                 TASK_ENV => self.step_environment(due),
+                crate::stellar::TASK_STARS => star_skip = Some(self.step_stars(due, k)),
                 _ => {}
             }
             self.scheduler.complete(task);
             if let Some(next_k) = skip {
                 self.scheduler.skip_to(TASK_CIV, next_k);
+            }
+            if let Some(next_k) = star_skip {
+                self.scheduler.skip_to(crate::stellar::TASK_STARS, next_k);
             }
             self.time = due;
             report.steps += 1;

@@ -110,7 +110,7 @@ pub fn generate_system(settings: &UniverseSettings, id: u32, position: Vec3d, ga
     };
     let outer_limit_au = companion.as_ref().map(|c| c.orbit.periapsis() / AU / 3.5).unwrap_or(80.0) * mass.sqrt().max(0.5);
 
-    let mut system = StarSystem { id, name, position, star, companion, bodies: Vec::new(), belts: Vec::new(), dynamics: None, pending_contacts: Vec::new() };
+    let mut system = StarSystem { id, name, position, star, companion, bodies: Vec::new(), belts: Vec::new(), dynamics: None, pending_contacts: Vec::new(), nebulae: Vec::new() };
     generate_planets(settings, &mut system, outer_limit_au, garden, age_gyr);
     system
 }
