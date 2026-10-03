@@ -77,11 +77,14 @@ save to a report file) · ⬜ AppImage/Flatpak.
 Profiling (Tracy), LOD tuning, memory budgets, UI polish, audio, tutorial, cinematic camera paths,
 localisation.
 
-## Known limitations of M1 (honest list)
-* Surfaces are baked equirectangular textures (≤ 4096 px): fine from orbit, blurry near the ground.
-* Earth's surface in the Sol scenario is procedural, not real geography.
-* A civilization is one statistical society; there are no rival nations on the same planet yet.
-* With a civilization alive, maximum speed is CPU-bound (years are never skipped).
-* Floating-point transcendental functions are not guaranteed bit-identical across CPU architectures,
-  so saves continue identically on the same platform but may diverge slowly across platforms
-  (fix: `libm`-based math in the sim — tracked).
+## Milestone 2 (done, v0.3.0)
+Real Earth relief · rival nations · close-up quadtree terrain · civilization LOD · cross-platform determinism ·
+Windows build + GitHub release pipeline.
+
+## Known limitations (honest list)
+* Close-up terrain is vertex-coloured relief without textures, vegetation, cities or volumetric clouds yet;
+  at very low altitude it looks smooth-sculpted rather than photographic (Phase 3/10).
+* Earth's moisture/biome pattern is procedural; only relief is real (Köppen climate data planned).
+* Nations share one knowledge pool; there is no diplomacy UI, trade or per-nation technology yet.
+* Unsigned builds: first launch needs an extra click on macOS and Windows (signing needs paid certificates).
+* The Windows build is cross-compiled and CI-built but has had no manual QA on Windows hardware yet.

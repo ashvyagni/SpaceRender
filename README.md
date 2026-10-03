@@ -10,6 +10,11 @@ timers, and change their planets in ways you can see from orbit.
 |---|---|
 | ![Civilization](docs/images/sol_modern.jpg) | ![City lights](docs/images/sol_night3.jpg) |
 
+## Download
+Get the latest **macOS `.dmg`** or **Windows `.exe`** from
+[GitHub Releases](https://github.com/ashvyagni/SpaceRender/releases). Nothing else needs to be installed.
+The builds are unsigned, so the first launch needs one extra click — see the release notes.
+
 ## Try it
 * **macOS:** open `dist/Cosmogon-<version>-macOS.dmg`, drag Cosmogon to Applications, double-click.
   (Unsigned builds: right-click → *Open* the first time.) To build it yourself: `scripts/package-macos.sh`.

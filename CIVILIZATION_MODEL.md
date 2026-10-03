@@ -38,6 +38,28 @@ Urban population follows a Zipf-like rule by founding order (older = bigger) wit
 rises; rural population is spread across sites up to a band/village cap. Tiers: camp → village → town → city →
 metropolis → megacity. Roads/rail link nearby towns over land; sea lanes link coastal towns across water.
 
+## Nations (polities)
+After agriculture, settlements organise into polities ([`civ/polity.rs`](crates/cosmogon_sim/src/civ/polity.rs)).
+An unclaimed settlement joins a polity it can reach, or — if it is a village or larger — founds a new
+chiefdom. Reach (walking, rafts, ships, roads, rail, aircraft) and water barriers shape territory, so
+continents and islands develop separate peoples. Each update (≈10 years, at most 100):
+* **Relations** drift towards friendship in peace and sour under hunger and instability.
+* **War** between neighbours is a hazard raised by instability, food pressure and hostility. Campaigns
+  capture border settlements in proportion to strength (population^0.6, size); losing every settlement
+  ends a polity; capitals move when lost. Wars kill people, lower stability and end in negotiated peace.
+* **Unions** are rare before modern communications; roads, rail and global networks make peaceful
+  federation increasingly likely.
+* **Secession**: large states in unstable times can split along distance from the capital (civil war).
+* **Governments** evolve: chiefdom → kingdom (writing) → empire (size) → republic (printing, revolution);
+  unions become federations; a single polity with >95% of people and global networks is a world government.
+* With nuclear weapons, wars between rival states at very low stability risk nuclear war.
+
+## Level of detail
+Each civilization chooses its own step: yearly in crises or after recent discoveries, then 10, 100 and
+1000 years in stable eras. Multi-year steps use exact solutions (logistic growth, knowledge decay) and
+event probabilities over the interval, so step size does not bias outcomes; the choice depends only on
+simulation state, so determinism holds.
+
 ## Calibration
 The Sol scenario (humans with fire and stone tools, 200,000 years ago) is the reference trajectory. Across seeds:
 agriculture 9,650–7,960 BCE (real ≈ 9,500 BCE, *caused* by the end of the last glacial period), writing

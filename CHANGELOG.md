@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 — Milestone 2 "Living worlds, rival nations" (2026-10-03)
+### Added
+* **Real Earth geography** (NOAA ETOPO5, public domain) with bicubic sampling; humanity starts in East Africa.
+* **Rival nations** (`civ/polity.rs`): polities with territory, capitals, governments, relations, border wars,
+  city captures, conquest, unions, secession, revolutions, world government; nuclear war between rivals.
+* **Close-up terrain**: cube-sphere quadtree LOD of displaced, vertex-coloured patches (skirts, horizon culling,
+  f64 placement), crater fields on airless worlds, path-length haze; terrain-aware camera.
+* **Civilization level of detail**: per-civilization step sizes (1/10/100/1000 yr) with exact multi-year
+  formulas; the civilization task sleeps when nothing is due.
+* **Cross-platform determinism**: all simulation transcendental math via `libm`; golden-fingerprint test in CI.
+* Windows cross-compilation from macOS; release workflow publishes a plain `.exe`, installer, portable zip, DMG.
+* CLI `profile`; app flags `--latlon`, `--debug`.
+### Changed
+* Research pace recalibrated for the industrial era; crisis pressures scale with severity.
+### Fixed
+* Airless worlds (Moon, Mercury, most moons) were never lit and rendered black.
+* Dry worlds measured height from a sentinel sea level and were drawn as ice; ice sheets now need water,
+  frozen water covers realistic areas; no snow on peaks of waterless worlds.
+* UI: opaque panels, markers occluded by planets, captures ignore user input.
+
+
 ## 0.2.0 — Milestone 1 "Living skeleton" (2026-10-03)
 First end-to-end vertical slice, shipped as a double-clickable macOS app.
 

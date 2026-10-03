@@ -41,9 +41,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/cosmogon.exe dist/Cosmogon.exe
           $v = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq cosmogon | Select-Object -ExpandProperty version
-          Compress-Archive -Path dist/Cosmogon.exe -DestinationPath "dist/Cosmogon-$v-Windows-portable.zip"
+          Copy-Item target/release/cosmogon.exe "dist/Cosmogon-$v-Windows.exe"
+          Compress-Archive -Path "dist/Cosmogon-$v-Windows.exe" -DestinationPath "dist/Cosmogon-$v-Windows-portable.zip"
           "COSMOGON_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Installer (Inno Setup)
         shell: pwsh
@@ -55,7 +55,7 @@ jobs:
           name: cosmogon-windows
           path: |
             dist/*.zip
-            dist/*Setup.exe
+            dist/*.exe
 
   linux:
     runs-on: ubuntu-latest
@@ -83,10 +83,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+          # Drafts are private until the repository owner reviews and publishes them.
           draft: true
+          body_path: RELEASE_NOTES.md

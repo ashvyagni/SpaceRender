@@ -27,6 +27,18 @@ levels (256 px → max preset width up to 4096 px), largest-on-screen first, ≤
 world green up or freeze over. Gas giants get banded turbulence; icy moons cracked ice; airless worlds rock and
 craters; thick hazes (Venus, Titan) a cloud deck. Biome colours blend continuously from temperature and moisture.
 
+## Close-up terrain
+When a solid world fills more than ~280 px, a cube-sphere quadtree of terrain patches is added
+([`render/terrain_lod.rs`](crates/cosmogon/src/render/terrain_lod.rs)). Leaves split while the camera is closer
+than `quality × patch size` (preset-dependent) down to level 17 (~20 m vertex spacing); patches beyond the horizon
+are skipped. Each 33×33 patch is meshed on a worker thread from the simulation's terrain plus visual-only detail
+(hills, ridged ranges in high country, fine roughness, three scales of impact craters on airless worlds), with
+geometric normals, per-vertex colour from the shared surface-colour function, UVs for clouds and city lights, and
+skirts to hide cracks. Patches are placed in f64 relative to the camera. Coarse patches stay until their
+replacements are ready; the textured sphere sinks slightly beneath as a fallback. Oceans are flat at sea level.
+The camera clamps to the real ground, zooms by altitude, slows down and tilts towards the horizon near the surface.
+Aerial haze uses the atmospheric path length, not camera distance.
+
 ## Civilizations
 City lights are baked from settlements (core + population-scaled sprawl) and lit transport corridors, refreshed
 every 1.5 s while visible, and shown only on the night side. Overlays (egui, occluded by nearby planets) draw

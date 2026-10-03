@@ -19,8 +19,9 @@ every major simplification.
   stored, so saves need none, and adding a new random consumer never perturbs existing ones.
 * Tests prove (a) identical universes from identical settings, (b) identical results however time is
   chopped into frames, (c) save → load → continue equals an uninterrupted run (`cosmogon-cli check`).
-* Caveat: `sin/exp/ln/powf` come from the platform's libm, so bit-identical results are guaranteed per
-  platform, not across CPU architectures (roadmap: switch the sim to the `libm` crate).
+* All transcendental functions in the simulation go through the pure-Rust `libm` crate (`DMath` trait),
+  so a seed produces **bit-identical universes on every OS and CPU**. A golden-fingerprint test runs in CI on
+  macOS (ARM), Windows and Linux (x86-64).
 
 ## Stars
 Piecewise mass–luminosity (`L ∝ M^2.3 / M^4 / M^3.5`) and mass–radius power laws; T from Stefan–Boltzmann;
@@ -54,6 +55,7 @@ small calibration offset so they match observations exactly while still respondi
   interglacials. Real Earth: glacial until 11,700 years ago (start of the Holocene).
 
 ## Terrain
+Earth uses measured relief (NOAA ETOPO5, bicubic); all other worlds are procedural.
 3D domain-warped gradient noise on the unit sphere plus ridged mountain belts; sea level chosen so the
 ocean fraction matches the climate model. Biomes from temperature (latitude, elevation lapse, substellar point
 for locked worlds) and moisture. **The same functions place settlements and paint the planet**.

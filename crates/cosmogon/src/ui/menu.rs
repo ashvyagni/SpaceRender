@@ -144,7 +144,7 @@ pub fn main_menu(
                         ui.colored_label(super::DANGER, m);
                     }
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                        ui.label(egui::RichText::new(format!("v{} · prototype milestone 1", env!("CARGO_PKG_VERSION"))).size(11.0).color(MUTED));
+                        ui.label(egui::RichText::new(format!("v{} · milestone 2", env!("CARGO_PKG_VERSION"))).size(11.0).color(MUTED));
                     });
                 }
                 super::MenuScreen::NewUniverse => new_universe(ui, ui_s, &mut commands, &mut next, &mut msg),
