@@ -304,17 +304,8 @@ impl StarSystem {
         if self.dynamics.is_some() {
             return;
         }
-        let mut bodies = vec![None; self.bodies.len()];
-        // Planets relative to the star, moons relative to their parent (parents first).
-        let mut rel: Vec<Option<State>> = vec![None; self.bodies.len()];
-        for i in 0..self.bodies.len() {
-            rel[i] = Some(self.kepler_state(i, t));
-        }
-        for i in 0..self.bodies.len() {
-            if self.starts_active(i) {
-                bodies[i] = rel[i];
-            }
-        }
+        // Analytic states in the star-centred frame; only some bodies become particles.
+        let bodies: Vec<Option<State>> = (0..self.bodies.len()).map(|i| self.starts_active(i).then(|| self.kepler_state(i, t))).collect();
         let companion = self.companion.as_ref().map(|c| {
             let mu = self.star.mu() + c.star.mu();
             let (p, v) = c.orbit.state(mu, mu, t);
@@ -334,7 +325,7 @@ impl StarSystem {
             temp_reported: Vec::new(),
             acc: Vec::new(),
         });
-        self.to_barycentre(t);
+        self.recentre_on_barycentre(t);
         self.retune(t);
     }
 
@@ -384,7 +375,7 @@ impl StarSystem {
             temp_reported: Vec::new(),
             acc: Vec::new(),
         });
-        self.to_barycentre(t);
+        self.recentre_on_barycentre(t);
         self.retune(t);
     }
 
@@ -402,7 +393,7 @@ impl StarSystem {
         }
     }
 
-    fn to_barycentre(&mut self, t: f64) {
+    fn recentre_on_barycentre(&mut self, t: f64) {
         let (mut ps, slots) = self.particles(t);
         nbody::to_barycentric(&mut ps);
         self.write_back(&ps, &slots);
@@ -590,7 +581,7 @@ impl StarSystem {
                 break;
             }
             if let Some(dl) = deadline {
-                if steps_done % 8 == 0 && Instant::now() > dl {
+                if steps_done.is_multiple_of(8) && Instant::now() > dl {
                     reached = false;
                     break;
                 }
@@ -719,14 +710,10 @@ impl StarSystem {
         let steps = ((horizon / dt).ceil() as usize).max(1);
         let every = (steps / samples.max(1)).max(1);
         let mut paths: Vec<Vec<Vec3d>> = ps.iter().map(|p| vec![p.pos]).collect();
-        let mut contact = None;
+        let mut contacts = Vec::new();
         for k in 0..steps {
             let r = nbody::step(&mut ps, t + k as f64 * dt, dt, &settings);
-            if contact.is_none() {
-                if let Some(c) = r.contacts.first() {
-                    contact = Some((slots[c.a], slots[c.b], c.time));
-                }
-            }
+            contacts.extend(r.contacts.iter().map(|c| (slots[c.a], slots[c.b], c.time)));
             if k % every == every - 1 || k == steps - 1 {
                 for (path, p) in paths.iter_mut().zip(&ps) {
                     if p.alive {
@@ -735,7 +722,9 @@ impl StarSystem {
                 }
             }
         }
-        Prediction { slots, paths, contact, step: dt }
+        // The projectile's own collision matters most to the caller; otherwise the first.
+        let contact = contacts.iter().copied().find(|(a, b, _)| *a == Slot::Body(u32::MAX) || *b == Slot::Body(u32::MAX)).or(contacts.first().copied());
+        Prediction { slots, paths, contact, contacts, step: dt }
     }
 
     /// Collisions found while syncing for an edit, waiting to be applied.
@@ -748,8 +737,9 @@ impl StarSystem {
 pub struct Prediction {
     pub slots: Vec<Slot>,
     pub paths: Vec<Vec<Vec3d>>,
-    /// (survivor, absorbed, time) of the first predicted collision.
+    /// (survivor, absorbed, time) of the projectile's predicted collision, else the first.
     pub contact: Option<(Slot, Slot, f64)>,
+    pub contacts: Vec<(Slot, Slot, f64)>,
     pub step: f64,
 }
 

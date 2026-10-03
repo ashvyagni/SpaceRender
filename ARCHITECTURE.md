@@ -7,18 +7,24 @@
 
 ```
 ┌──────────────────────────── crates/cosmogon (Bevy app) ────────────────────────────┐
-│  sim.rs        drive Universe: create/load on task pool, advance under CPU budget  │
+│  sim.rs        sessions (sandbox / read-only reference), create/load on task pool, │
+│                advance under CPU budget, edits with undo/redo, predictions, saves  │
+│  persistence   sandbox folders: manifest, state, autosave, checkpoints, thumbnail  │
 │  camera.rs     f64 orbit/zoom/track rig → defines the floating origin each frame    │
 │  render/       f64 WorldPos → camera-relative Transforms; planet & atmosphere WGSL; │
 │                textures baked from the sim's own terrain; lights from settlements   │
-│  ui/           egui: menu, HUD, browser, inspector, civilization dashboard, markers │
+│  ui/           egui: home, HUD, tools (create, launch, physics, palette), editable  │
+│                inspector with units & provenance, civilization dashboard, markers   │
 │  capture.rs    GPU screenshots for verification                                     │
 └───────────────────────────────▲──────────────────────────────────────────────────────┘
                                 │  reads state, issues commands (never edits the model)
 ┌───────────────────────────────┴──────── crates/cosmogon_sim (no engine deps) ───────┐
 │  universe.rs   owns all state; advance_to(t, budget, stop_on_milestone)              │
 │  scheduler.rs  fixed-period tasks: biospheres every 10 kyr, civilizations every year │
-│  astro/        stars, Kepler orbits, procedural systems, real Sol (data/sol.toml)    │
+│  astro/        stars, Kepler orbits, dynamics (N-body state per system), objects &  │
+│                provenance, JPL Horizons dataset, procedural systems, real Sol        │
+│  sandbox.rs    Edit commands → validate, apply, journal, propagate consequences     │
+│  impact.rs     impact energy, crater, blast, winter, extinction scaling             │
 │  planet/       climate, terrain (shared with renderer), resources & deposits         │
 │  habitability, life, civ/ (species, knowledge, tech graph, settlements), history     │
 │  save.rs       versioned JSON with migrations          rng.rs  keyed RNG streams     │
@@ -34,7 +40,7 @@
 | Crate | Responsibility | Depends on |
 |---|---|---|
 | `cosmogon_core` | f64 vectors, constants, units | — |
-| `cosmogon_physics` | orbital mechanics, integrators | core |
+| `cosmogon_physics` | orbital mechanics, N-body integrator, collisions | core |
 | `cosmogon_sim` | the universe model (everything that isn't pixels) | core, physics, serde, toml |
 | `cosmogon_cli` | headless runs, determinism checks, surveys | sim |
 | `cosmogon` | the desktop app | sim, Bevy 0.18, bevy_egui |
@@ -52,6 +58,14 @@ Update:  Frame::Simulate  → advance universe (≤ 9 ms CPU budget)
          Frame::Apply     → Transform = world − origin; materials; texture LOD; lights; gizmos
 EguiPrimaryContextPass:     markers, panels, toasts
 ```
+
+## Sandbox edits and the consequence pipeline
+The UI never mutates the model: it sends `cosmogon_sim::sandbox::Edit` commands through
+`Sim::edit` (which keeps an undo snapshot). `Universe::apply_edit` validates, activates N-body
+for the system, syncs the integrator exactly to the current time, applies, re-grids the step,
+journals the edit and propagates it. Physics emits collisions (`ContactEvent`) and the
+environment task notices insolation changes; `sandbox.rs` carries both down the chain:
+orbit → insolation → climate → habitability → biosphere → civilization (see docs/SANDBOX_VISION.md).
 
 ## Ownership and concurrency
 All simulation state lives in one `Universe` value owned by the `Sim` resource. Universe creation

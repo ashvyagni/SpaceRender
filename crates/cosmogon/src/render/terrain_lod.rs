@@ -327,7 +327,7 @@ pub fn update_terrain_lod(
     let t = u.time;
     // Which body (if any) deserves close-up terrain?
     let candidate = match rig.focus {
-        Some(Target::Body(r)) if u.body(r).kind.has_surface() => {
+        Some(Target::Body(r)) if u.systems.get(r.system as usize).and_then(|s| s.bodies.get(r.body as usize)).is_some_and(|b| b.exists() && b.kind.has_surface()) => {
             let pos = to_render(u.body_position(r, t));
             (view.screen_radius(pos, u.body(r).radius) > ACTIVATE_PX).then_some(r)
         }
@@ -352,7 +352,7 @@ pub fn update_terrain_lod(
 
     // Surface model; rebuilt (and patches regenerated) when the world itself changes.
     let veg = u.biosphere(r).is_some_and(|b| b.vegetated());
-    let sig = ((body.hydro.ocean_fraction * 40.0) as u64) ^ (((body.hydro.ice_fraction * 40.0) as u64) << 8) ^ ((body.temperature * 0.2) as u64) << 16 ^ (veg as u64) << 40;
+    let sig = (body.radius.to_bits().rotate_left(24)) ^ ((body.hydro.ocean_fraction * 40.0) as u64) ^ (((body.hydro.ice_fraction * 40.0) as u64) << 8) ^ ((body.temperature * 0.2) as u64) << 16 ^ (veg as u64) << 40;
     if lod.model.is_none() || lod.model_signature != sig {
         for (_, state) in lod.nodes.drain() {
             if let NodeState::Ready(e) = state {
@@ -458,6 +458,9 @@ pub fn position_patches(sim: Res<Sim>, mut q: Query<(&TerrainPatch, &mut WorldPo
     let t = u.time;
     let mut cache: Option<(BodyRef, DVec3, DQuat)> = None;
     for (p, mut wp, mut tf) in &mut q {
+        if u.systems.get(p.body.system as usize).is_none_or(|s| s.bodies.len() <= p.body.body as usize) {
+            continue;
+        }
         let (center, rot) = match cache {
             Some((b, c, r)) if b == p.body => (c, r),
             _ => {

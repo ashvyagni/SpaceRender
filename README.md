@@ -1,10 +1,15 @@
 # Cosmogon
 
-**A living universe.** A physically grounded space simulator in which potentially habitable worlds can
-develop life and, sometimes, civilizations. Those civilizations discover technology through causes, not
-timers, and change their planets in ways you can see from orbit.
+**A universe sandbox that remembers.** Start from the real Solar System (NASA/JPL data), add planets,
+throw asteroids, change the Sun — and watch the consequences run through orbits, climate, life and
+civilizations. Worlds can develop life and, sometimes, civilizations that discover technology through
+causes, not timers.
 
-![Main menu](docs/images/menu.jpg)
+![Home](docs/images/home.jpg)
+
+| Launching an asteroid at Earth — the predicted path bends under gravity | The impact: energy, crater, winter, extinction |
+|---|---|
+| ![Launch](docs/images/sandbox_launch.jpg) | ![Impact](docs/images/sandbox_impact.jpg) |
 
 | Rival nations on the real Earth, 4000 CE | The night side of an industrial world |
 |---|---|
@@ -24,9 +29,24 @@ The builds are unsigned, so the first launch needs one extra click — see the r
   Windows installer and portable `.exe`, a universal macOS DMG and a Linux tarball.
 * **From source:** `cargo run --release -p cosmogon` (see [BUILDING.md](BUILDING.md)).
 
-Three scenarios: a realistic **stellar neighbourhood** (often lifeless — that's the point), a **garden world**
-rich in complex life, and **Sol — Dawn of Humanity**, the real Solar System 200,000 years ago. Pick a speed from
-real time to 100 million years per second; the simulation slows down by itself for milestones.
+**NEW SANDBOX** offers seven templates: the **Solar System Lab** (today's Solar System from JPL Horizons, with
+N-body gravity), **Dawn of Humanity** (the real Solar System 200,000 years ago, with early humans), a
+**habitable world**, a **procedural star system**, a **stellar neighbourhood**, an **empty system** to build
+yourself, and **custom**. **SCENARIOS** has ready-made experiments (no Moon, 2× Jupiter, a brighter Sun,
+Chicxulub today, a rogue planet, two moons, Mars with Earth's air). **REAL UNIVERSE** shows the real data
+read-only; clone it to experiment. Time runs from real time to 100 million years per second.
+
+## The sandbox
+* **+ Create** a planet, moon, giant, dwarf planet, asteroid or comet: choose mass, radius, where it orbits and how fast.
+* **Launch** an object at any body: the predicted trajectory and any impact are shown before you release it.
+* **Edit anything** in the inspector — mass, radius, gravity, day length, tilt, orbit, atmosphere, water, the star's
+  mass and age — in the units you like (typed values accept scientific notation). Every change is undoable.
+* **Physics**: switch between fixed (Kepler) orbits and dynamic N-body gravity; choose Fast, Balanced, Accurate or
+  Research. Collisions merge bodies; impacts leave craters, cause impact winters and extinctions.
+* **Consequences**: change an orbit or the Sun and the climate, habitability and civilizations respond; the
+  chronicle reports what happened and why.
+* **Honest data**: every value is labelled MEASURED, DERIVED, ESTIMATED, PROCEDURAL or USER MODIFIED.
+* Sandboxes save to their own folders with autosave, checkpoints, duplicates and thumbnails; **Continue** resumes.
 
 ## What's simulated
 Stars that brighten and die · Keplerian orbits exact at any time scale · procedural systems with statistically
@@ -42,10 +62,14 @@ missing for the next ones ("Bronze working — needs tin ≥ 0.15× Earth").
 
 ## Controls
 Drag to orbit · scroll (or W/S) to zoom from metres to light-years · click to select · double-click or **F** to fly
-there · **Home** for the whole system · **Space** pause · **, .** speed · **Tab** hide UI · **⌘/Ctrl+S** quick save ·
-**F3** developer overlay · **F1** help · **Esc** menu.
+there · **Home** for the whole system · **Space** pause · **, .** speed · **⌘/Ctrl+K** command palette ·
+**⌘/Ctrl+Z / Shift+Z** undo / redo · **⌘/Ctrl+S** save · **Tab** hide UI · **F3** developer overlay · **F1** help ·
+**Esc** menu.
 
 ## Documentation
+[Sandbox vision](docs/SANDBOX_VISION.md) · [Milestone S1 status](docs/MILESTONE_S1.md) ·
+[Physics engine](docs/PHYSICS_ENGINE.md) · [Data sources](docs/DATA_SOURCES.md) · [Object model](docs/OBJECT_MODEL.md) ·
+[Save format](docs/SAVE_FORMAT.md) · [UI system](docs/UI_SYSTEM.md) · [Gap analysis](docs/GAP_ANALYSIS.md) ·
 [ARCHITECTURE](ARCHITECTURE.md) · [ROADMAP](ROADMAP.md) · [SIMULATION](SIMULATION.md) ·
 [CIVILIZATION_MODEL](CIVILIZATION_MODEL.md) · [TECHNOLOGY_MODEL](TECHNOLOGY_MODEL.md) · [RENDERING](RENDERING.md) ·
 [BUILDING](BUILDING.md) · [CHANGELOG](CHANGELOG.md) · [prototype audit](docs/AUDIT.md) ·

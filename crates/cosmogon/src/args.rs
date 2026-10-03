@@ -30,6 +30,18 @@ pub struct Args {
     pub debug: bool,
     /// Place the camera above this latitude,longitude (degrees) of the focused body.
     pub latlon: Option<(f64, f64)>,
+    /// Apply a curated experiment (`--what-if chicxulub_today`) to a new Solar System Lab.
+    pub what_if: Option<String>,
+    /// Physics preset to start the home system with dynamic gravity (fast|balanced|accurate|research).
+    pub nbody: Option<String>,
+    /// Open a tool window at start (create | launch | physics | palette) — for captures.
+    pub panel: Option<String>,
+    /// Open a home screen at start (new | load | scenarios | settings | credits) — for captures.
+    pub menu: Option<String>,
+    /// Developer starts are saved to the library (normally they are not).
+    pub persist: bool,
+    /// Open the most recent sandbox (same as CONTINUE).
+    pub continue_latest: bool,
 }
 
 impl Args {
@@ -64,6 +76,12 @@ impl Args {
                 "--hide-ui" => a.hide_ui = true,
                 "--select-civ" => a.select_civ = true,
                 "--debug" => a.debug = true,
+                "--what-if" => a.what_if = Some(val()),
+                "--nbody" => a.nbody = Some(val()),
+                "--panel" => a.panel = Some(val()),
+                "--menu" => a.menu = Some(val()),
+                "--persist" => a.persist = true,
+                "--continue" => a.continue_latest = true,
                 "--latlon" => {
                     let v = val();
                     let mut it = v.split(',').map(|x| if x.trim() == "noon" { Ok(f64::NAN) } else { x.trim().parse::<f64>() });

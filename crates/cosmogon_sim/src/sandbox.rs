@@ -995,6 +995,97 @@ fn compact(n: f64) -> String {
     }
 }
 
+// ── Curated experiments ─────────────────────────────────────────────────────
+
+/// A curated "what if" built from ordinary edits on the Solar System Lab — no special physics.
+#[derive(Clone, Copy, Debug)]
+pub struct WhatIf {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+}
+
+pub const WHAT_IFS: &[WhatIf] = &[
+    WhatIf { id: "no_moon", title: "What if the Moon disappeared?", description: "The Moon is removed from today's Solar System. Watch Earth's orbit and climate without it." },
+    WhatIf { id: "jupiter_x2", title: "What if Jupiter were twice as massive?", description: "Jupiter's mass doubles; every planet feels the stronger pull." },
+    WhatIf { id: "sun_plus10", title: "What if the Sun were 10% more massive?", description: "A brighter, heavier Sun: faster orbits and a hotter Earth." },
+    WhatIf { id: "chicxulub_today", title: "What if Chicxulub happened today?", description: "A 10 km asteroid is a day away from Earth, on a collision course." },
+    WhatIf { id: "rogue_planet", title: "What if a rogue planet passed through?", description: "An Earth-mass rogue world falls in from 40 AU on a path that crosses the inner Solar System." },
+    WhatIf { id: "two_moons", title: "What if Earth had two moons?", description: "A second Moon-like body orbits Earth at twice the Moon's distance." },
+    WhatIf { id: "mars_earth_air", title: "What if Mars had Earth's air?", description: "Mars gets a 1-bar nitrogen–oxygen atmosphere and some of its water back." },
+];
+
+fn find(u: &Universe, name: &str) -> Result<BodyRef, String> {
+    u.system(0).find_body(name).map(|i| BodyRef { system: 0, body: i as u32 }).ok_or_else(|| format!("{name} not found"))
+}
+
+/// Set up a curated experiment on a freshly created Solar System Lab.
+pub fn apply_what_if(u: &mut Universe, id: &str) -> Result<(), String> {
+    let t = u.time;
+    match id {
+        "no_moon" => {
+            let moon = find(u, "Moon")?;
+            u.apply_edit(Edit::RemoveBody { body: moon })?;
+        }
+        "jupiter_x2" => {
+            let j = find(u, "Jupiter")?;
+            let m = u.body(j).mass * 2.0;
+            u.apply_edit(Edit::SetProperty { body: j, property: BodyProperty::Mass(m) })?;
+        }
+        "sun_plus10" => {
+            let m = u.system(0).star.mass * 1.1;
+            u.apply_edit(Edit::SetStar { system: 0, property: StarProperty::Mass(m) })?;
+        }
+        "chicxulub_today" => {
+            let e = find(u, "Earth")?;
+            let body = body_from_preset(preset("asteroid_10km").unwrap(), "Impactor", 0xC41C);
+            let state = aimed_state(u.system(0), e.body as usize, 1.5e9, Vec3d::new(0.2, 1.0, 0.15), 17_000.0, 2.0e6, t);
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "rogue_planet" => {
+            let body = body_from_preset(preset("earth_like").unwrap(), "Rogue", 0x2066);
+            let sys = u.system(0);
+            let gm = sys.star.mu();
+            let (r0, v0, q) = (40.0 * AU, 8_000.0, 1.1 * AU);
+            // Hyperbolic path with perihelion q: energy and angular momentum from (r0, v0, q).
+            let energy = 0.5 * v0 * v0 - gm / r0;
+            let vq = (2.0 * (energy + gm / q)).sqrt();
+            let vt = q * vq / r0;
+            let vr = -(v0 * v0 - vt * vt).max(0.0).sqrt();
+            let dir = Vec3d::new(0.8, 0.6, 0.05).normalize();
+            let side = Vec3d::new(0.0, 0.0, 1.0).cross(dir).normalize();
+            let star = sys.star_local_position(t);
+            let state = State { pos: star + dir * r0, vel: dir * vr + side * vt };
+            let mut body = body;
+            body.class = Some(ObjectClass::RoguePlanet);
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "two_moons" => {
+            let e = find(u, "Earth")?;
+            let mut body = body_from_preset(preset("moon_like").unwrap(), "Selene", 0x5E1E);
+            body.parent = Some(e.body);
+            let state = circular_state(u.system(0), Some(e.body as usize), body.mass, 2.0 * 384_400e3, 2.5, 0.09, t);
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "mars_earth_air" => {
+            let m = find(u, "Mars")?;
+            u.apply_edit(Edit::SetProperty { body: m, property: BodyProperty::SurfacePressure(1.0) })?;
+            {
+                let a = &mut u.systems[0].bodies[m.body as usize].atmosphere;
+                a.n2 = 0.7804;
+                a.o2 = 0.2095;
+                a.co2 = 0.0004;
+                a.h2o = 0.0;
+                a.ch4 = 0.0;
+                a.h2he = 0.0;
+            }
+            u.apply_edit(Edit::SetProperty { body: m, property: BodyProperty::WaterInventory(0.3) })?;
+        }
+        other => return Err(format!("unknown experiment {other}")),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1154,6 +1245,36 @@ mod tests {
         // Earth-sized with Jupiter's mass: allowed, with a warning.
         u.apply_edit(Edit::SetProperty { body: e, property: BodyProperty::Mass(1.898e27) }).unwrap();
         assert!(warnings(&u, e).iter().any(|w| w.contains("exceeds any ordinary")));
+    }
+
+    #[test]
+    fn every_what_if_sets_up_and_runs() {
+        for w in WHAT_IFS {
+            let mut u = lab();
+            apply_what_if(&mut u, w.id).unwrap_or_else(|e| panic!("{}: {e}", w.id));
+            u.advance_by(0.2 * SECONDS_PER_YEAR);
+            assert!(u.system(0).dynamics.as_ref().unwrap().diagnostics.energy_error.is_finite(), "{}", w.id);
+        }
+        // Chicxulub today really hits.
+        let mut u = lab();
+        apply_what_if(&mut u, "chicxulub_today").unwrap();
+        u.advance_by(5.0 * SECONDS_PER_DAY);
+        assert!(!u.body(earth(&u)).impacts.is_empty());
+    }
+
+    #[test]
+    fn prediction_sees_an_aimed_impact() {
+        let u = lab();
+        let e = earth(&u);
+        let body = body_from_preset(preset("asteroid_1km").unwrap(), "A", 1);
+        let (sa, ca) = 0.6f64.sin_cos();
+        let (se, ce) = 0.1f64.sin_cos();
+        let st = aimed_state(u.system(0), e.body as usize, 2.0e9, Vec3d::new(ce * ca, ce * sa, se), 20_000.0, 0.0, u.time);
+        let p = u.system(0).predict(u.time, Some(cosmogon_physics::nbody::Particle::new(st.pos, st.vel, G * body.mass, body.radius)), 2.0 * SECONDS_PER_YEAR, 600, 30_000);
+        let (a, b, tc) = p.contact.expect("impact predicted");
+        assert_eq!(a, Slot::Body(e.body));
+        assert_eq!(b, Slot::Body(u32::MAX));
+        assert!(tc - u.time < 2.0 * SECONDS_PER_DAY, "{}", (tc - u.time) / SECONDS_PER_DAY);
     }
 
     #[test]

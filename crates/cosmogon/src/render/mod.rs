@@ -15,7 +15,6 @@ pub mod overlays;
 mod sky;
 pub mod terrain_lod;
 
-use std::f64::consts::TAU;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::asset::embedded_asset;
@@ -122,13 +121,14 @@ impl Plugin for RenderPlugin {
         ))
             .init_resource::<ViewInfo>()
             .init_resource::<terrain_lod::TerrainLod>()
+            .init_resource::<SpawnedBodies>()
             .add_systems(Startup, sky::setup_sky)
             .add_systems(OnEnter(AppState::Observing), spawn_universe)
             .add_systems(OnExit(AppState::Observing), despawn_universe)
             .add_systems(
                 Update,
                 (
-                    (update_world_positions, terrain_lod::position_patches, terrain_lod::sink_base_sphere).chain().in_set(Frame::Positions),
+                    (sync_body_visuals, update_world_positions, terrain_lod::position_patches, terrain_lod::sink_base_sphere).chain().in_set(Frame::Positions),
                     (terrain_lod::update_terrain_lod, apply_origin, update_planet_materials, request_bakes, finish_bakes, update_lights).chain().in_set(Frame::Apply),
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
@@ -207,11 +207,83 @@ fn ring_mesh(inner: f32, outer: f32) -> Mesh {
         .with_inserted_indices(Indices::U32(idx))
 }
 
+/// Which body visuals exist, and the appearance they were built for. When a sandbox edit
+/// adds a body or changes how one looks, `sync_body_visuals` builds or rebuilds it.
+#[derive(Resource, Default)]
+pub struct SpawnedBodies(pub std::collections::HashMap<BodyRef, (Entity, u64)>);
+
+/// Hash of everything that is baked into a body's visual at spawn time.
+fn appearance_key(body: &Body) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (body.kind as u8).hash(&mut h);
+    body.terrain_seed.hash(&mut h);
+    body.color.iter().for_each(|c| c.to_bits().hash(&mut h));
+    body.rings.is_some().hash(&mut h);
+    body.removed.is_some().hash(&mut h);
+    if let Some((c, s)) = atmosphere_look(body) {
+        c.iter().for_each(|x| x.to_bits().hash(&mut h));
+        ((s * 20.0).round() as i32).hash(&mut h);
+    }
+    h.finish()
+}
+
 #[allow(clippy::too_many_arguments)]
-fn spawn_universe(
+fn spawn_body(
+    commands: &mut Commands,
+    r: BodyRef,
+    body: &Body,
+    shared: &SharedMeshes,
+    meshes: &mut Assets<Mesh>,
+    std_mats: &mut Assets<StandardMaterial>,
+    planet_mats: &mut Assets<PlanetMaterial>,
+    atmo_mats: &mut Assets<AtmosphereMaterial>,
+    images: &mut Assets<Image>,
+) -> Entity {
+    let black = images.add(solid_image([0, 0, 0, 0], TextureFormat::R8Unorm));
+    let c = body.color;
+    let albedo = images.add(solid_image([(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 0], TextureFormat::Rgba8UnormSrgb));
+    let mat = planet_mats.add(PlanetMaterial { u: PlanetUniform::default(), albedo, clouds: black.clone(), lights: black });
+    let mut e = commands.spawn((
+        Mesh3d(shared.sphere.clone()),
+        MeshMaterial3d(mat),
+        Transform::from_scale(Vec3::splat(body.radius as f32)),
+        WorldPos::default(),
+        BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0 },
+        SimVisual,
+    ));
+    e.with_children(|p| {
+        if let Some((color, strength)) = atmosphere_look(body) {
+            let thickness = if body.kind.has_surface() { 1.025 } else { 1.04 };
+            let m = atmo_mats.add(AtmosphereMaterial { u: AtmosphereUniform { sun: Vec4::new(1.0, 0.0, 0.0, 1.0), color: Vec4::new(color[0], color[1], color[2], strength) } });
+            p.spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(m), Transform::from_scale(Vec3::splat(thickness)), AtmosphereShell(r)));
+        }
+        if let Some(rings) = &body.rings {
+            let tex = bake::bake_rings(body.terrain_seed, rings.opacity, body.color);
+            let img = images.add(image_from(tex, 256, 1, TextureFormat::Rgba8UnormSrgb));
+            let ring = meshes.add(ring_mesh((rings.inner / body.radius) as f32, (rings.outer / body.radius) as f32));
+            let m = std_mats.add(StandardMaterial {
+                base_color_texture: Some(img),
+                base_color: Color::srgb(0.75, 0.72, 0.66),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            });
+            p.spawn((Mesh3d(ring), MeshMaterial3d(m), Transform::default()));
+        }
+    });
+    e.id()
+}
+
+/// Build visuals for bodies created in the sandbox, rebuild edited ones, drop removed ones.
+#[allow(clippy::too_many_arguments)]
+fn sync_body_visuals(
     mut commands: Commands,
     sim: Res<Sim>,
     shared: Res<SharedMeshes>,
+    mut spawned: ResMut<SpawnedBodies>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut std_mats: ResMut<Assets<StandardMaterial>>,
     mut planet_mats: ResMut<Assets<PlanetMaterial>>,
@@ -219,8 +291,43 @@ fn spawn_universe(
     mut images: ResMut<Assets<Image>>,
 ) {
     let u = &sim.universe;
+    for sys in &u.systems {
+        for (bi, body) in sys.bodies.iter().enumerate() {
+            let r = BodyRef { system: sys.id, body: bi as u32 };
+            let key = appearance_key(body);
+            match spawned.0.get(&r) {
+                Some((_, k)) if *k == key => continue,
+                Some((e, _)) => {
+                    commands.entity(*e).despawn();
+                    spawned.0.remove(&r);
+                }
+                None => {}
+            }
+            if body.exists() {
+                let e = spawn_body(&mut commands, r, body, &shared, &mut meshes, &mut std_mats, &mut planet_mats, &mut atmo_mats, &mut images);
+                spawned.0.insert(r, (e, key));
+            }
+        }
+    }
+    // Bodies that vanished from the universe entirely (undo of an addition).
+    let stale: Vec<BodyRef> = spawned.0.keys().filter(|r| u.systems.get(r.system as usize).is_none_or(|s| s.bodies.len() <= r.body as usize)).copied().collect();
+    for r in stale {
+        if let Some((e, _)) = spawned.0.remove(&r) {
+            commands.entity(e).despawn();
+        }
+    }
+}
+
+fn spawn_universe(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    shared: Res<SharedMeshes>,
+    mut std_mats: ResMut<Assets<StandardMaterial>>,
+    mut spawned: ResMut<SpawnedBodies>,
+) {
+    let u = &sim.universe;
     let t = u.time;
-    let black = images.add(solid_image([0, 0, 0, 0], TextureFormat::R8Unorm));
+    spawned.0.clear();
     for sys in &u.systems {
         let stars = std::iter::once((&sys.star, false)).chain(sys.companion.as_ref().map(|c| (&c.star, true)));
         for (star, companion) in stars {
@@ -237,48 +344,13 @@ fn spawn_universe(
                 SimVisual,
             ));
         }
-
-        for (bi, body) in sys.bodies.iter().enumerate() {
-            let r = BodyRef { system: sys.id, body: bi as u32 };
-            let c = body.color;
-            let albedo = images.add(solid_image([(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 0], TextureFormat::Rgba8UnormSrgb));
-            let mat = planet_mats.add(PlanetMaterial { u: PlanetUniform::default(), albedo, clouds: black.clone(), lights: black.clone() });
-            let mut e = commands.spawn((
-                Mesh3d(shared.sphere.clone()),
-                MeshMaterial3d(mat),
-                Transform::from_scale(Vec3::splat(body.radius as f32)),
-                WorldPos::default(),
-                BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0 },
-                SimVisual,
-            ));
-            e.with_children(|p| {
-                if let Some((color, strength)) = atmosphere_look(body) {
-                    let thickness = if body.kind.has_surface() { 1.025 } else { 1.04 };
-                    let m = atmo_mats.add(AtmosphereMaterial { u: AtmosphereUniform { sun: Vec4::new(1.0, 0.0, 0.0, 1.0), color: Vec4::new(color[0], color[1], color[2], strength) } });
-                    p.spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(m), Transform::from_scale(Vec3::splat(thickness)), AtmosphereShell(r)));
-                }
-                if let Some(rings) = &body.rings {
-                    let tex = bake::bake_rings(body.terrain_seed, rings.opacity, body.color);
-                    let img = images.add(image_from(tex, 256, 1, TextureFormat::Rgba8UnormSrgb));
-                    let ring = meshes.add(ring_mesh((rings.inner / body.radius) as f32, (rings.outer / body.radius) as f32));
-                    let m = std_mats.add(StandardMaterial {
-                        base_color_texture: Some(img),
-                        base_color: Color::srgb(0.75, 0.72, 0.66),
-                        alpha_mode: AlphaMode::Blend,
-                        unlit: true,
-                        double_sided: true,
-                        cull_mode: None,
-                        ..default()
-                    });
-                    p.spawn((Mesh3d(ring), MeshMaterial3d(m), Transform::default()));
-                }
-            });
-        }
     }
+    // Bodies are built by `sync_body_visuals` (also used when the sandbox changes).
     info!("spawned visuals for {} systems", u.systems.len());
 }
 
-fn despawn_universe(mut commands: Commands, q: Query<Entity, With<SimVisual>>, mut lod: ResMut<terrain_lod::TerrainLod>) {
+fn despawn_universe(mut commands: Commands, q: Query<Entity, With<SimVisual>>, mut lod: ResMut<terrain_lod::TerrainLod>, mut spawned: ResMut<SpawnedBodies>) {
+    spawned.0.clear();
     *lod = terrain_lod::TerrainLod::default();
     for e in &q {
         commands.entity(e).despawn();
@@ -286,28 +358,30 @@ fn despawn_universe(mut commands: Commands, q: Query<Entity, With<SimVisual>>, m
 }
 
 /// Orientation of a body: axial tilt and spin (tidally locked bodies face their primary).
+/// The spin comes from the simulation so impacts land where they are drawn.
 pub fn body_rotation(sim: &Sim, r: BodyRef, t: f64) -> Quat {
     let sys = sim.universe.system(r.system);
     let b = &sys.bodies[r.body as usize];
-    let spin = if b.tidally_locked {
-        let rel = sys.body_local_position(r.body as usize, t) - b.parent.map(|p| sys.body_local_position(p as usize, t)).unwrap_or(Vec3d::ZERO);
-        (-rel.y).atan2(-rel.x)
-    } else {
-        (t / b.rotation_period).rem_euclid(1.0) * TAU
-    };
+    let spin = sys.spin_angle(r.body as usize, t);
     sim_to_render_rot() * Quat::from_rotation_x(b.axial_tilt as f32) * Quat::from_rotation_z(spin as f32)
 }
 
-fn update_world_positions(sim: Res<Sim>, mut stars: Query<(&StarVisual, &mut WorldPos), Without<BodyVisual>>, mut bodies: Query<(&BodyVisual, &mut WorldPos, &mut Transform), Without<StarVisual>>) {
+fn update_world_positions(sim: Res<Sim>, mut stars: Query<(&StarVisual, &mut WorldPos), Without<BodyVisual>>, mut bodies: Query<(&mut BodyVisual, &mut WorldPos, &mut Transform), Without<StarVisual>>) {
     let u = &sim.universe;
     let t = u.time;
     for (s, mut wp) in &mut stars {
         let sys = u.system(s.system);
-        wp.0 = to_render(if s.companion { sys.companion_position(t).unwrap_or(sys.position) } else { sys.position });
+        wp.0 = to_render(if s.companion { sys.companion_position(t).unwrap_or(sys.position) } else { sys.star_position(t) });
     }
-    for (b, mut wp, mut tf) in &mut bodies {
+    for (mut b, mut wp, mut tf) in &mut bodies {
+        let Some(body) = u.systems.get(b.r.system as usize).and_then(|s| s.bodies.get(b.r.body as usize)) else { continue };
         wp.0 = to_render(u.body_position(b.r, t));
         tf.rotation = body_rotation(&sim, b.r, t);
+        // Radius can change in a sandbox (edits, mergers).
+        if b.radius != body.radius {
+            b.radius = body.radius;
+            tf.scale = Vec3::splat(body.radius as f32);
+        }
     }
 }
 

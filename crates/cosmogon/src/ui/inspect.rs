@@ -15,6 +15,9 @@ use super::charts::{bar, line_chart};
 use super::{compact, heading, kv, power, BodyTab, LeftTab, UiState, ACCENT, CIV, DANGER, LIFE, MUTED, TEXT};
 use crate::camera::CameraRig;
 use crate::sim::{Sim, Target};
+use super::units::{self, Quantity};
+use cosmogon_sim::astro::{Quality, RemovalCause, SOLAR_MASS};
+use cosmogon_sim::sandbox::{hill_radius, roche_limit, warnings, BodyProperty, Edit, StarProperty};
 
 fn life_glyph(u: &Universe, r: BodyRef) -> Option<(&'static str, egui::Color32)> {
     if u.civ_on(r).is_some() {
@@ -138,7 +141,7 @@ pub fn left_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut
 fn body_row(ui: &mut egui::Ui, u: &Universe, sim: &Sim, r: BodyRef, indent: usize, action: &mut Option<Action>) {
     let b = u.body(r);
     let glyph = match b.kind {
-        BodyKind::GasGiant | BodyKind::IceGiant => "●",
+        BodyKind::GasGiant | BodyKind::IceGiant => "○",
         _ => "○",
     };
     let mut text = format!("{}{} {}", "    ".repeat(indent + 1), glyph, b.name);
@@ -163,15 +166,20 @@ fn status_label(c: &Civilization) -> String {
     }
 }
 
-pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, sim: Res<Sim>, mut rig: ResMut<CameraRig>) -> Result {
+pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, settings: Res<crate::persistence::UserSettings>, time: Res<Time>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui_state.hidden || !ui_state.show_right {
         return Ok(());
     }
     let Some(sel) = sim.selected else { return Ok(()) };
     let mut fly = false;
-    egui::SidePanel::right("inspector").default_width(370.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(12)).show(ctx, |ui| {
+    let mut edits: Vec<Edit> = Vec::new();
+    let editable = !sim.is_reference();
+    let now = time.elapsed_secs_f64();
+    egui::SidePanel::right("inspector").default_width(390.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(12)).show(ctx, |ui| {
         let u = &sim.universe;
+        let ctx = Ctx { editable, settings: &settings, edits: &mut edits };
+        let mut ctx = ctx;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match sel {
             Target::Star(s) => {
                 ui.horizontal(|ui| {
@@ -180,64 +188,120 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, si
                         fly = true;
                     }
                 });
-                star_card(ui, u, s);
+                star_card(ui, u, s, &mut ctx);
             }
             Target::Body(r) => {
-                let b = u.body(r);
+                let Some(b) = u.systems.get(r.system as usize).and_then(|x| x.bodies.get(r.body as usize)) else { return };
                 ui.horizontal(|ui| {
                     ui.heading(&b.name);
-                    if rig.focus != Some(sel) && ui.button("Fly to").clicked() {
+                    if rig.focus != Some(sel) && b.exists() && ui.button("Fly to").clicked() {
                         fly = true;
                     }
                 });
-                let sub = format!("{} in the {} system{}", b.kind.label(), u.system(r.system).name, if b.real { " · real data" } else { "" });
+                let sub = format!("{} in the {} system", b.class().label(), u.system(r.system).name);
                 ui.label(egui::RichText::new(sub).color(MUTED).size(12.0));
+                ui.label(egui::RichText::new(b.source_label()).color(MUTED).size(10.5)).on_hover_text("Where this object's values come from. See the DATA tab.");
+                if let Some(rm) = &b.removed {
+                    let how = match rm.cause {
+                        RemovalCause::Deleted => "Deleted".to_string(),
+                        RemovalCause::MergedInto(Some(i)) => format!("Collided with {}", u.system(r.system).bodies[i as usize].name),
+                        RemovalCause::MergedInto(None) => format!("Fell into {}", u.system(r.system).star.name),
+                    };
+                    ui.colored_label(DANGER, format!("{how} — {}", format_date(rm.time, u.start_time, u.gregorian())));
+                    return;
+                }
+                for w in warnings(u, r) {
+                    ui.colored_label(DANGER, format!("⚠ {w}"));
+                }
                 ui.add_space(4.0);
                 let civ = u.civ_on(r).is_some() || u.civs.iter().any(|c| c.system == r.system && c.body == r.body);
                 ui.horizontal_wrapped(|ui| {
-                    ui.selectable_value(&mut ui_state.body_tab, BodyTab::Overview, "Overview");
-                    ui.selectable_value(&mut ui_state.body_tab, BodyTab::Orbit, "Orbit");
-                    ui.selectable_value(&mut ui_state.body_tab, BodyTab::Environment, "Environment");
-                    ui.selectable_value(&mut ui_state.body_tab, BodyTab::Life, "Life");
+                    for (tab, label) in [(BodyTab::Overview, "Overview"), (BodyTab::Orbit, "Orbit"), (BodyTab::Physics, "Physics"), (BodyTab::Environment, "Environment"), (BodyTab::Life, "Life")] {
+                        ui.selectable_value(&mut ui_state.body_tab, tab, label);
+                    }
                     if civ {
                         ui.selectable_value(&mut ui_state.body_tab, BodyTab::Civilization, egui::RichText::new("Civilization").color(CIV));
                     }
+                    ui.selectable_value(&mut ui_state.body_tab, BodyTab::History, "History");
+                    ui.selectable_value(&mut ui_state.body_tab, BodyTab::Data, "Data");
                 });
                 ui.separator();
                 let tab = if ui_state.body_tab == BodyTab::Civilization && !civ { BodyTab::Overview } else { ui_state.body_tab };
                 match tab {
-                    BodyTab::Overview => overview(ui, u, r),
-                    BodyTab::Orbit => orbit(ui, u, r),
-                    BodyTab::Environment => environment(ui, u, r),
+                    BodyTab::Overview => overview(ui, u, r, &mut ctx),
+                    BodyTab::Orbit => orbit(ui, u, r, &mut ctx, &mut ui_state.impulse),
+                    BodyTab::Physics => physics_tab(ui, u, r),
+                    BodyTab::Environment => environment(ui, u, r, &mut ctx),
                     BodyTab::Life => life(ui, u, r),
                     BodyTab::Civilization => {
                         if let Some(c) = u.civs.iter().rev().find(|c| c.system == r.system && c.body == r.body) {
                             civilization(ui, u, c, &mut ui_state);
                         }
                     }
+                    BodyTab::History => history_tab(ui, u, r),
+                    BodyTab::Data => data_tab(ui, u, r),
                 }
             }
         });
     });
+    for e in edits {
+        let _ = sim.edit(e, now);
+    }
     if fly {
         rig.focus_on(sel, &sim, None);
     }
     Ok(())
 }
 
-fn star_card(ui: &mut egui::Ui, u: &Universe, s: u32) {
+/// Editing context for inspector sections.
+struct Ctx<'a> {
+    editable: bool,
+    settings: &'a crate::persistence::UserSettings,
+    edits: &'a mut Vec<Edit>,
+}
+
+/// A labelled quantity row: editable in sandboxes, with unit choice and provenance.
+#[allow(clippy::too_many_arguments)]
+fn row(ui: &mut egui::Ui, ctx: &mut Ctx, label: &str, salt: &str, si: f64, q: Quantity, unit: usize, quality: Option<Quality>, editable: bool) -> Option<f64> {
+    ui.label(egui::RichText::new(label).color(MUTED));
+    let out = units::edit(ui, salt, si, q, unit, editable && ctx.editable, quality);
+    ui.end_row();
+    out
+}
+
+fn star_card(ui: &mut egui::Ui, u: &Universe, s: u32, ctx: &mut Ctx) {
     let sys = u.system(s);
     let st = &sys.star;
     let t = u.time;
     ui.label(egui::RichText::new(format!("{} star · {}", st.spectral_type(t), st.phase(t).label())).color(MUTED));
+    let measured = sys.bodies.iter().any(|b| b.real);
+    let q = |user: bool| Some(if user { Quality::UserModified } else if measured { Quality::Measured } else { Quality::Procedural });
+    let derived = Some(Quality::Derived);
     egui::Grid::new("star").num_columns(2).striped(true).show(ui, |ui| {
-        kv(ui, "Mass", format!("{:.3} M_sun", st.mass));
-        kv(ui, "Radius", format!("{:.3} R_sun", st.current_radius(t) / cosmogon_sim::astro::SOLAR_RADIUS));
-        kv(ui, "Luminosity", format!("{:.4} L_sun", st.luminosity(t)));
-        kv(ui, "Temperature", format!("{:.0} K", st.temperature_at(t)));
-        kv(ui, "Age", format_duration(st.age(t)));
+        let user = u.edits.iter().any(|e| matches!(&e.edit, Edit::SetStar { system, .. } if *system == s));
+        if let Some(v) = row(ui, ctx, "Mass", "star_mass", st.mass * SOLAR_MASS, Quantity::Mass, 3, q(user), true) {
+            ctx.edits.push(Edit::SetStar { system: s, property: StarProperty::Mass(v / SOLAR_MASS) });
+        }
+        if let Some(v) = row(ui, ctx, "Age", "star_age", st.age(t), Quantity::Duration, 3, q(user), true) {
+            ctx.edits.push(Edit::SetStar { system: s, property: StarProperty::Age(v) });
+        }
+        ui.label(egui::RichText::new("Metallicity [Fe/H]").color(MUTED));
+        ui.horizontal(|ui| {
+            let mut z = st.metallicity;
+            if ctx.editable {
+                let r = ui.add(egui::DragValue::new(&mut z).speed(0.01).range(-3.0..=1.0).suffix(" dex"));
+                if r.drag_stopped() || r.lost_focus() {
+                    ctx.edits.push(Edit::SetStar { system: s, property: StarProperty::Metallicity(z) });
+                }
+            } else {
+                ui.label(format!("{z:+.2} dex"));
+            }
+        });
+        ui.end_row();
+        row(ui, ctx, "Radius", "star_r", st.current_radius(t), Quantity::Length, 4, derived, false);
+        row(ui, ctx, "Luminosity (L☉)", "star_l", st.luminosity(t), Quantity::Plain, 0, derived, false);
+        row(ui, ctx, "Temperature", "star_t", st.temperature_at(t), Quantity::Temperature, 0, derived, false);
         kv(ui, "Main-sequence life", format_duration(st.lifetime));
-        kv(ui, "Metallicity [Fe/H]", format!("{:+.2}", st.metallicity));
         kv(ui, "Flare activity", format!("{:.2}", st.flare_activity_at(t)));
         let (hi, ho) = st.habitable_zone_au(t);
         kv(ui, "Habitable zone", format!("{hi:.2} – {ho:.2} AU"));
@@ -245,22 +309,39 @@ fn star_card(ui: &mut egui::Ui, u: &Universe, s: u32) {
         if let Some(c) = &sys.companion {
             kv(ui, "Companion", format!("{} ({}, {:.0} AU)", c.star.name, c.star.spectral_type(t), c.orbit.a / AU));
         }
-        kv(ui, "Worlds", format!("{} planets, {} moons", sys.planets().count(), sys.bodies.len() - sys.planets().count()));
+        kv(ui, "Worlds", format!("{} planets, {} moons", sys.planets().count(), sys.existing().count() - sys.planets().count()));
     });
+    ui.label(egui::RichText::new("Stellar model: mass sets luminosity, radius, temperature and lifetime (main-sequence relations with brightening). Changing the mass re-derives them; every planet's climate responds.").size(10.5).color(MUTED));
 }
 
-fn overview(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
+fn overview(ui: &mut egui::Ui, u: &Universe, r: BodyRef, ctx: &mut Ctx) {
     let b = u.body(r);
     let hab = u.habitability(r);
+    let mu = ctx.settings.mass_unit;
     egui::Grid::new("ov").num_columns(2).striped(true).show(ui, |ui| {
-        kv(ui, "Mass", format!("{:.3} M_E ({:.3e} kg)", b.mass_earths(), b.mass));
-        kv(ui, "Radius", format!("{:.3} R_E ({} km)", b.radius_earths(), group_digits(b.radius / 1000.0)));
-        kv(ui, "Surface gravity", format!("{:.2} g", b.gravity_g()));
-        kv(ui, "Density", format!("{:.0} kg/m³", b.density()));
-        kv(ui, "Escape velocity", format!("{:.2} km/s", b.escape_velocity() / 1000.0));
-        kv(ui, "Rotation", if b.tidally_locked { "tidally locked".to_string() } else { format!("{:.2} h{}", b.rotation_period.abs() / 3600.0, if b.rotation_period < 0.0 { " (retrograde)" } else { "" }) });
-        kv(ui, "Axial tilt", format!("{:.1}°", b.axial_tilt.to_degrees()));
-        kv(ui, "Mean temperature", format!("{:.0} K ({:.0} °C)", b.temperature, b.temperature - 273.15));
+        if let Some(v) = row(ui, ctx, "Mass", "mass", b.mass, Quantity::Mass, mu, Some(b.quality("mass")), true) {
+            ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::Mass(v) });
+        }
+        if let Some(v) = row(ui, ctx, "Radius", "radius", b.radius, Quantity::Length, 1, Some(b.quality("radius")), true) {
+            ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::Radius(v) });
+        }
+        // Surface gravity can be set: radius follows (mass held).
+        if let Some(g) = row(ui, ctx, "Surface gravity (m/s²)", "gravity", b.gravity(), Quantity::Plain, 0, Some(Quality::Derived), true) {
+            if g > 0.0 {
+                ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::Radius((b.mu() / g).sqrt()) });
+            }
+        }
+        row(ui, ctx, "Density (kg/m³)", "density", b.density(), Quantity::Plain, 0, Some(Quality::Derived), false);
+        row(ui, ctx, "Escape velocity", "vesc", b.escape_velocity(), Quantity::Speed, ctx.settings.speed_unit, Some(Quality::Derived), false);
+        if b.tidally_locked {
+            kv(ui, "Rotation", "tidally locked");
+        } else if let Some(v) = row(ui, ctx, "Day length", "rot", b.rotation_period.abs(), Quantity::Duration, 1, Some(b.quality("rotation_period")), true) {
+            ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::RotationPeriod(v.max(1.0) * b.rotation_period.signum()) });
+        }
+        if let Some(v) = row(ui, ctx, "Axial tilt", "tilt", b.axial_tilt, Quantity::Angle, 0, Some(b.quality("axial_tilt")), true) {
+            ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::AxialTilt(v) });
+        }
+        row(ui, ctx, "Mean temperature", "temp", b.temperature, Quantity::Temperature, ctx.settings.temperature_unit, Some(Quality::Derived), false);
         kv(ui, "Magnetic field", format!("{:.2}× Earth", b.magnetic_field));
         kv(ui, "Geological activity", format!("{:.2}× Earth", b.geology));
         kv(ui, "Habitability", egui::RichText::new(format!("{} ({:.2})", hab.label(), hab.score)).color(if hab.score > 0.0 { LIFE } else { MUTED }));
@@ -268,6 +349,13 @@ fn overview(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
             kv(ui, "Δv to orbit", format!("{:.1} km/s", b.launch_delta_v_kms()));
         }
     });
+    if ctx.editable {
+        ui.horizontal(|ui| {
+            if ui.button("Delete object").on_hover_text("Undoable (Cmd/Ctrl+Z)").clicked() {
+                ctx.edits.push(Edit::RemoveBody { body: r });
+            }
+        });
+    }
     if let Some(c) = u.civ_on(r) {
         ui.add_space(6.0);
         ui.label(egui::RichText::new(format!("Home of {} ({} people)", c.name, compact(c.population))).color(CIV));
@@ -277,33 +365,215 @@ fn overview(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
     }
 }
 
-fn orbit(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
+fn orbit(ui: &mut egui::Ui, u: &Universe, r: BodyRef, ctx: &mut Ctx, impulse: &mut [f64; 3]) {
     let sys = u.system(r.system);
-    let b = &sys.bodies[r.body as usize];
-    let o = &b.orbit;
-    let mu = sys.parent_mu(r.body as usize);
+    let i = r.body as usize;
+    let b = &sys.bodies[i];
     let parent = b.parent.map(|p| sys.bodies[p as usize].name.clone()).unwrap_or_else(|| sys.star.name.clone());
-    let pos = sys.body_local_position(r.body as usize, u.time) - b.parent.map(|p| sys.body_local_position(p as usize, u.time)).unwrap_or_default();
+    let el = sys.osculating(i, u.time);
+    let mu = sys.parent_mu(i) + b.mu();
+    let s = sys.body_state(i, u.time);
+    let p = sys.parent_state(i, u.time);
+    let dist = (s.pos - p.pos).length();
+    let speed = (s.vel - p.vel).length();
+    let dynamic = sys.is_dynamic();
+    let du = ctx.settings.distance_unit;
+    let mut set_orbit: Option<(f64, f64, f64, f64, f64, f64)> = None;
+    let base = (el.semi_major_axis, el.eccentricity, el.inclination, el.longitude_ascending, el.argument_perihelion, el.mean_anomaly);
     egui::Grid::new("orb").num_columns(2).striped(true).show(ui, |ui| {
         kv(ui, "Orbits", parent);
-        kv(ui, "Semi-major axis", super::distance(o.a));
-        kv(ui, "Eccentricity", format!("{:.4}", o.e));
-        kv(ui, "Inclination", format!("{:.2}°", o.i.to_degrees()));
-        kv(ui, "Ascending node", format!("{:.2}°", o.node.to_degrees()));
-        kv(ui, "Arg. of periapsis", format!("{:.2}°", o.peri.to_degrees()));
-        kv(ui, "Periapsis / apoapsis", format!("{} / {}", super::distance(o.periapsis()), super::distance(o.apoapsis())));
-        kv(ui, "Period", format_duration(o.period(mu)));
-        kv(ui, "Current distance", super::distance(pos.length()));
-        kv(ui, "Mean anomaly", format!("{:.1}°", o.mean_anomaly(mu, u.time).to_degrees()));
+        if el.is_bound() {
+            let q = Some(b.quality("orbit"));
+            if let Some(v) = row(ui, ctx, "Semi-major axis", "a", el.semi_major_axis, Quantity::Length, if b.parent.is_some() { 1 } else { 5 }, q, true) {
+                set_orbit = Some((v, base.1, base.2, base.3, base.4, base.5));
+            }
+            ui.label(egui::RichText::new("Eccentricity").color(MUTED));
+            let mut e = el.eccentricity;
+            if ctx.editable {
+                let resp = ui.add(egui::DragValue::new(&mut e).speed(0.002).range(0.0..=0.999).max_decimals(5));
+                if resp.drag_stopped() || resp.lost_focus() {
+                    set_orbit = Some((base.0, e, base.2, base.3, base.4, base.5));
+                }
+            } else {
+                ui.label(format!("{e:.5}"));
+            }
+            ui.end_row();
+            if let Some(v) = row(ui, ctx, "Inclination", "inc", el.inclination, Quantity::Angle, 0, q, true) {
+                set_orbit = Some((base.0, base.1, v, base.3, base.4, base.5));
+            }
+            if ctx.settings.advanced {
+                if let Some(v) = row(ui, ctx, "Ascending node", "node", el.longitude_ascending, Quantity::Angle, 0, q, true) {
+                    set_orbit = Some((base.0, base.1, base.2, v, base.4, base.5));
+                }
+                if let Some(v) = row(ui, ctx, "Arg. of periapsis", "peri", el.argument_perihelion, Quantity::Angle, 0, q, true) {
+                    set_orbit = Some((base.0, base.1, base.2, base.3, v, base.5));
+                }
+                if let Some(v) = row(ui, ctx, "Mean anomaly", "ma", el.mean_anomaly, Quantity::Angle, 0, q, true) {
+                    set_orbit = Some((base.0, base.1, base.2, base.3, base.4, v));
+                }
+            }
+            kv(ui, "Periapsis / apoapsis", format!("{} / {}", super::distance(el.periapsis()), super::distance(el.apoapsis())));
+            kv(ui, "Period", format_duration(std::f64::consts::TAU * (el.semi_major_axis.powi(3) / mu).sqrt()));
+        } else {
+            kv(ui, "Path", egui::RichText::new(format!("unbound (e = {:.3}) — escaping", el.eccentricity)).color(DANGER));
+        }
+        row(ui, ctx, "Current distance", "dist", dist, Quantity::Length, du, Some(Quality::Derived), false);
+        row(ui, ctx, "Speed", "speed", speed, Quantity::Speed, ctx.settings.speed_unit, Some(Quality::Derived), false);
     });
-    ui.label(egui::RichText::new("Analytic Keplerian propagation: exact at any time scale.").size(11.0).color(MUTED));
+    if let Some((a, e, inc, node, peri, ma)) = set_orbit {
+        ctx.edits.push(Edit::SetOrbit { body: r, a, e, i: inc, node, peri, mean_anomaly: ma });
+    }
+    if ctx.editable {
+        heading(ui, "Push (velocity change)");
+        ui.horizontal(|ui| {
+            for (k, axis) in ["prograde", "radial out", "normal"].iter().enumerate() {
+                ui.label(egui::RichText::new(*axis).size(10.5).color(MUTED));
+                ui.add(egui::DragValue::new(&mut impulse[k]).speed(10.0).suffix(" m/s"));
+            }
+        });
+        if ui.button("Apply push").on_hover_text("Δv along the direction of motion, away from the parent, and perpendicular to the orbit").clicked() {
+            let rel_v = s.vel - p.vel;
+            let rel_r = s.pos - p.pos;
+            let pro = rel_v.normalize();
+            let normal = rel_r.cross(rel_v).normalize();
+            let radial = pro.cross(normal);
+            let dv = pro * impulse[0] - radial * impulse[1] + normal * impulse[2];
+            ctx.edits.push(Edit::Impulse { body: r, dv });
+            *impulse = [0.0; 3];
+        }
+        if ctx.settings.advanced {
+            heading(ui, "State vectors (system frame)");
+            ui.label(egui::RichText::new(format!("r = ({:.6e}, {:.6e}, {:.6e}) m", s.pos.x, s.pos.y, s.pos.z)).size(11.0).monospace());
+            ui.label(egui::RichText::new(format!("v = ({:.4}, {:.4}, {:.4}) m/s", s.vel.x, s.vel.y, s.vel.z)).size(11.0).monospace());
+        }
+    }
+    ui.label(egui::RichText::new(if dynamic { "Osculating elements of the N-body state: the ellipse the body would follow if all other forces vanished now." } else { "Analytic Keplerian propagation: exact at any time scale." }).size(10.5).color(MUTED));
 }
 
-fn environment(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
+fn physics_tab(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
+    let sys = u.system(r.system);
+    let i = r.body as usize;
+    let b = &sys.bodies[i];
+    heading(ui, "Simulation model");
+    let (model, tier) = match &sys.dynamics {
+        None => ("Analytic Kepler orbit", "Tier 1"),
+        Some(d) if d.bodies.get(i).copied().flatten().is_some() => ("Newtonian N-body particle (4th-order symplectic)", "Tier 2 · tier 3 during encounters"),
+        Some(_) => ("Kepler 'rails' around its N-body parent (massless test body)", "Tier 1 — becomes a particle if edited or approached"),
+    };
+    egui::Grid::new("phys").num_columns(2).striped(true).show(ui, |ui| {
+        kv(ui, "Motion", model);
+        kv(ui, "Fidelity", tier);
+        kv(ui, "Shape", "sphere, uniform density (no oblateness)");
+        kv(ui, "Tides", "not simulated yet (milestone S3)");
+        let star_mass = sys.star.mass * SOLAR_MASS;
+        let (pm, pr, pd) = match b.parent {
+            Some(p) => (sys.bodies[p as usize].mass, sys.bodies[p as usize].radius, sys.bodies[p as usize].density()),
+            None => (star_mass, sys.star.current_radius(u.time), star_mass / (4.0 / 3.0 * std::f64::consts::PI * sys.star.current_radius(u.time).powi(3))),
+        };
+        let el = sys.osculating(i, u.time);
+        if el.is_bound() {
+            kv(ui, "Hill sphere", super::distance(hill_radius(el.semi_major_axis, b.mass, pm)));
+        }
+        kv(ui, "Roche limit of parent (for this body)", super::distance(roche_limit(pr, pd, b.density())));
+        let _ = pm;
+        if let Some(d) = &sys.dynamics {
+            kv(ui, "System step", format_duration(d.dt));
+            kv(ui, "Energy error (system)", format!("{:.2e}", d.diagnostics.energy_error));
+            kv(ui, "Preset", d.settings.preset.label());
+        }
+    });
+    if !b.impacts.is_empty() {
+        heading(ui, &format!("Impacts received ({})", b.impacts.len()));
+        for im in b.impacts.iter().rev().take(10) {
+            ui.label(egui::RichText::new(format!("{} — {} · {:.3e} Mt · {:.1} km/s · crater {:.1} km · {}", format_date(im.time, u.start_time, u.gregorian()), im.impactor, im.energy_mt(), im.speed / 1000.0, im.crater_m / 1000.0, im.class.label())).size(11.0));
+        }
+    }
+}
+
+fn history_tab(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
+    heading(ui, "What happened here");
+    let mut any = false;
+    for e in u.history.events.iter().rev().filter(|e| e.system == Some(r.system) && e.body == Some(r.body)).take(120) {
+        any = true;
+        let color = match e.category {
+            Category::Disaster | Category::War => DANGER,
+            Category::Life => LIFE,
+            Category::Civilization | Category::Technology => CIV,
+            _ => TEXT,
+        };
+        ui.label(egui::RichText::new(format!("{} — {}", format_date(e.time, u.start_time, u.gregorian()), e.title)).size(11.5).color(color)).on_hover_text(&e.detail);
+    }
+    if !any {
+        ui.label(egui::RichText::new("Nothing recorded yet.").color(MUTED));
+    }
+}
+
+fn data_tab(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
+    let b = u.body(r);
+    heading(ui, "Source");
+    ui.label(b.source_label());
+    heading(ui, "Data quality");
+    egui::Grid::new("dq").num_columns(2).striped(true).show(ui, |ui| {
+        for (label, f) in [
+            ("Mass", "mass"),
+            ("Radius", "radius"),
+            ("Position & velocity", "position"),
+            ("Orbit", "orbit"),
+            ("Rotation", "rotation_period"),
+            ("Axial tilt", "axial_tilt"),
+            ("Albedo", "albedo"),
+            ("Atmosphere", "atmosphere"),
+            ("Water", "water"),
+            ("Temperature", "temperature"),
+            ("Habitability", "habitability"),
+            ("Surface relief", "terrain"),
+            ("Resources", "resources"),
+        ] {
+            ui.label(egui::RichText::new(label).color(MUTED));
+            let q = if f == "terrain" && b.elevation_data.is_some() { Quality::Measured } else { b.quality(f) };
+            units::quality_badge(ui, q);
+            ui.end_row();
+        }
+    });
+    ui.label(egui::RichText::new("MEASURED: observational dataset · DERIVED: computed by a documented model · ESTIMATED: model estimate without measurement · PROCEDURAL: generated from a seed · USER MODIFIED: changed in this sandbox.").size(10.5).color(MUTED));
+    let journal: Vec<_> = u.edits.iter().filter(|e| e.edit.system() == r.system && edit_touches(&e.edit, r)).collect();
+    if !journal.is_empty() {
+        heading(ui, "Your changes");
+        for e in journal.iter().rev().take(30) {
+            ui.label(egui::RichText::new(format!("{} — {}", format_date(e.time, u.start_time, u.gregorian()), e.summary)).size(11.0));
+        }
+    }
+}
+
+fn edit_touches(e: &Edit, r: BodyRef) -> bool {
+    match e {
+        Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } => *body == r,
+        Edit::AddBody { .. } => false,
+        _ => false,
+    }
+}
+
+fn environment(ui: &mut egui::Ui, u: &Universe, r: BodyRef, ctx: &mut Ctx) {
     let b = u.body(r);
     heading(ui, "Atmosphere");
     ui.label(b.atmosphere.describe());
     let a = &b.atmosphere;
+    if b.kind.has_surface() {
+        egui::Grid::new("atm_edit").num_columns(2).show(ui, |ui| {
+            if let Some(v) = row(ui, ctx, "Surface pressure", "press", a.pressure_bar, Quantity::Pressure, 0, Some(b.quality("atmosphere")), true) {
+                ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::SurfacePressure(v) });
+            }
+            if let Some(v) = row(ui, ctx, "CO₂", "co2", a.co2, Quantity::Fraction, 0, Some(b.quality("atmosphere")), true) {
+                ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::Co2Fraction(v.clamp(0.0, 1.0)) });
+            }
+            if let Some(v) = row(ui, ctx, "Water (Earth oceans)", "water", b.hydro.water_inventory, Quantity::Plain, 0, Some(b.quality("water")), true) {
+                ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::WaterInventory(v.max(0.0)) });
+            }
+            if let Some(v) = row(ui, ctx, "Bond albedo", "albedo", b.albedo, Quantity::Plain, 0, Some(b.quality("albedo")), true) {
+                ctx.edits.push(Edit::SetProperty { body: r, property: BodyProperty::Albedo(v.clamp(0.0, 1.0)) });
+            }
+        });
+    }
     if a.is_present() {
         for (name, v) in [("N₂", a.n2), ("O₂", a.o2), ("CO₂", a.co2), ("H₂O", a.h2o), ("CH₄", a.ch4), ("H₂ / He", a.h2he)] {
             if v > 1e-5 {
@@ -313,17 +583,22 @@ fn environment(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
     }
     heading(ui, "Water & climate");
     egui::Grid::new("env").num_columns(2).striped(true).show(ui, |ui| {
-        kv(ui, "Water inventory", format!("{:.3} Earth oceans", b.hydro.water_inventory));
         kv(ui, "Ocean cover", format!("{:.0}%", b.hydro.ocean_fraction * 100.0));
         kv(ui, "Ice cover", format!("{:.0}%", b.hydro.ice_fraction * 100.0));
         kv(ui, "Subsurface ocean", if b.hydro.subsurface_ocean { "yes" } else { "no" });
-        kv(ui, "Bond albedo", format!("{:.2}", b.albedo));
         kv(ui, "Equilibrium temp.", format!("{:.0} K", b.equilibrium_temperature));
-        kv(ui, "Surface temp.", format!("{:.0} K", b.temperature));
+        kv(ui, "Surface temp.", format!("{:.1} K ({:.1} °C)", b.temperature, b.temperature - 273.15));
+        let sys = u.system(r.system);
+        let flux = cosmogon_sim::sandbox::flux_of(sys, r.body as usize, u.time);
+        kv(ui, "Insolation (annual mean)", format!("{flux:.3} × Earth's"));
+        if let Some(w) = &b.impact_winter {
+            kv(ui, "Impact winter", egui::RichText::new(format!("−{:.1} K now", w.cooling_at(u.time))).color(DANGER));
+        }
         if b.kind.has_surface() {
             kv(ui, "Climate", if b.climate_stability(u.time) > 0.6 { "stable (interglacial)" } else { "glacial swings" });
         }
     });
+    ui.label(egui::RichText::new("Climate model: zero-dimensional grey greenhouse, driven by the current orbit's annual-mean sunlight. Changes to orbit, star or atmosphere propagate to temperature, water, habitability and civilizations.").size(10.5).color(MUTED));
     if b.kind.has_surface() {
         heading(ui, "Resources (Earth = 1)");
         let res = &b.resources;

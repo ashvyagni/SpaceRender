@@ -12,12 +12,30 @@ use crate::render::ViewInfo;
 use crate::sim::{Sim, Target};
 use crate::state::AppState;
 
-pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, mut ui: ResMut<UiState>, time: Res<Time>, args: Res<crate::args::Args>) -> Result {
+pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, mut ui: ResMut<UiState>, mut settings: ResMut<UserSettings>, time: Res<Time>, args: Res<crate::args::Args>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if args.capture.is_some() {
         return Ok(());
     }
+    let now = time.elapsed_secs_f64();
+    let cmd = keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::SuperRight) || keys.pressed(KeyCode::ControlRight);
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    // Shortcuts that work even while a text field has focus.
+    if cmd && keys.just_pressed(KeyCode::KeyK) {
+        ui.palette_open = !ui.palette_open;
+    }
+    if cmd && keys.just_pressed(KeyCode::KeyS) {
+        super::tools::run_command(super::tools::Cmd::Save, &mut ui, &mut sim, &mut settings, now);
+    }
     if ctx.wants_keyboard_input() {
+        return Ok(());
+    }
+    if cmd && keys.just_pressed(KeyCode::KeyZ) {
+        if shift { sim.redo(now) } else { sim.undo(now) }
+        return Ok(());
+    }
+    if cmd && keys.just_pressed(KeyCode::KeyY) {
+        sim.redo(now);
         return Ok(());
     }
     if keys.just_pressed(KeyCode::Space) {
@@ -39,13 +57,12 @@ pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut
         ui.help = !ui.help;
     }
     if keys.just_pressed(KeyCode::Escape) {
-        ui.pause_menu = !ui.pause_menu;
-    }
-    let cmd = keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::SuperRight) || keys.pressed(KeyCode::ControlRight);
-    if cmd && keys.just_pressed(KeyCode::KeyS) {
-        let stem = format!("quicksave-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
-        if let Err(e) = sim.save(&stem, time.elapsed_secs_f64()) {
-            sim.status = Some((format!("Save failed: {e}"), time.elapsed_secs_f64()));
+        if matches!(sim.tool, crate::sim::Tool::Launch(_)) {
+            sim.tool = crate::sim::Tool::Select;
+        } else if ui.create_open {
+            ui.create_open = false;
+        } else {
+            ui.pause_menu = !ui.pause_menu;
         }
     }
     Ok(())
@@ -57,16 +74,48 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
         return Ok(());
     }
     let now = time.elapsed_secs_f64();
-    egui::TopBottomPanel::top("top").exact_height(40.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(egui::Margin::symmetric(12, 6))).show(ctx, |ui| {
+    egui::TopBottomPanel::top("top").exact_height(44.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(egui::Margin::symmetric(12, 6))).show(ctx, |ui| {
         ui.horizontal_centered(|ui| {
             if ui.button("☰").on_hover_text("Menu (Esc)").clicked() {
                 ui_state.pause_menu = !ui_state.pause_menu;
             }
             ui.label(egui::RichText::new("COSMOGON").strong().extra_letter_spacing(3.0));
-            ui.label(egui::RichText::new(format!("{} · seed {}", sim.universe.settings.scenario.label(), sim.universe.settings.seed)).color(MUTED).size(12.0));
+            let reference = sim.is_reference();
+            let (badge, color) = if reference { ("REFERENCE · READ-ONLY", egui::Color32::from_rgb(110, 180, 240)) } else { ("SANDBOX", ACCENT) };
+            egui::Frame::new().stroke(egui::Stroke::new(1.0_f32, color)).corner_radius(4).inner_margin(egui::Margin::symmetric(6, 2)).show(ui, |ui| {
+                ui.label(egui::RichText::new(badge).size(10.0).color(color).strong());
+            });
+            let title = sim.session.title();
+            ui.label(egui::RichText::new(format!("{title}{}", if sim.dirty && !reference { " •" } else { "" })).color(TEXT).size(13.0)).on_hover_text(if sim.dirty { "Unsaved changes (Cmd/Ctrl+S to save; autosave also runs)" } else { "Saved" });
             ui.separator();
-            // Search across systems, bodies and civilizations.
-            let resp = ui.add(egui::TextEdit::singleline(&mut ui_state.search).hint_text("Search worlds, stars, civilizations…").desired_width(260.0));
+            if reference {
+                if ui.add(egui::Button::new(egui::RichText::new("Clone to sandbox").strong()).fill(egui::Color32::from_rgb(70, 54, 24))).on_hover_text("Copy this real-data state into your own experiment").clicked() {
+                    ui_state.clone_dialog = Some("My Solar System experiment".into());
+                }
+            } else {
+                let undo = sim.undo_label().map(|s| s.to_string());
+                let redo = sim.redo_label().map(|s| s.to_string());
+                if ui.add_enabled(undo.is_some(), egui::Button::new("Undo")).on_hover_text(undo.map(|u| format!("Undo: {u} (Cmd/Ctrl+Z)")).unwrap_or_default()).clicked() {
+                    sim.undo(now);
+                }
+                if ui.add_enabled(redo.is_some(), egui::Button::new("Redo")).on_hover_text(redo.map(|u| format!("Redo: {u} (Shift+Cmd/Ctrl+Z)")).unwrap_or_default()).clicked() {
+                    sim.redo(now);
+                }
+                ui.separator();
+                if ui.selectable_label(ui_state.create_open, "+ Create").on_hover_text("Add a planet, moon, asteroid or comet").clicked() {
+                    ui_state.create_open = !ui_state.create_open;
+                }
+                let launching = matches!(sim.tool, crate::sim::Tool::Launch(_));
+                if ui.selectable_label(launching, "Launch").on_hover_text("Throw an object at a target").clicked() {
+                    sim.tool = if launching { crate::sim::Tool::Select } else { crate::sim::Tool::Launch(Default::default()) };
+                }
+            }
+            if ui.selectable_label(ui_state.physics_open, "Physics").clicked() {
+                ui_state.physics_open = !ui_state.physics_open;
+            }
+            ui.separator();
+            // Search across systems, bodies and civilizations (⌘K for everything).
+            let resp = ui.add(egui::TextEdit::singleline(&mut ui_state.search).hint_text("Search… (Cmd/Ctrl+K: commands)").desired_width(190.0));
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 let q = ui_state.search.trim().to_string();
                 let found = find_target(&sim, &q).or_else(|| sim.universe.civs.iter().find(|c| c.name.to_lowercase().contains(&q.to_lowercase())).map(|c| Target::Body(cosmogon_sim::BodyRef { system: c.system, body: c.body })));
@@ -82,8 +131,15 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.toggle_value(&mut ui_state.show_right, "Inspector");
                 ui.toggle_value(&mut ui_state.show_left, "Universe");
-                ui.toggle_value(&mut settings.show_labels, "Labels");
-                ui.toggle_value(&mut settings.show_orbits, "Orbits");
+                ui.menu_button("View", |ui| {
+                    ui.checkbox(&mut settings.show_orbits, "Orbits");
+                    ui.checkbox(&mut settings.show_labels, "Labels");
+                    ui.checkbox(&mut settings.show_trails, "Trails (past path)");
+                    ui.checkbox(&mut settings.show_predictions, "Predicted trajectory");
+                    ui.checkbox(&mut settings.show_velocity, "Velocity vector");
+                    ui.separator();
+                    ui.checkbox(&mut settings.advanced, "Advanced mode");
+                });
                 if ui.button("?").on_hover_text("Controls (F1)").clicked() {
                     ui_state.help = !ui_state.help;
                 }
@@ -118,7 +174,7 @@ pub fn bottom_bar(mut contexts: EguiContexts, ui_state: Res<UiState>, mut sim: R
                 let requested = sim.rate();
                 if !sim.paused && sim.effective_rate > 0.0 && sim.effective_rate < requested * 0.7 {
                     ui.label(egui::RichText::new(format!("CPU-limited: {}/s", format_duration(sim.effective_rate))).size(10.5).color(MUTED))
-                        .on_hover_text("The simulation steps every civilization year by year and never skips steps to go faster. It is running as fast as this computer allows.");
+                        .on_hover_text("Every step is computed — gravity, climate, every civilization year — and none is skipped to go faster. It is running as fast as this computer allows.");
                 } else {
                     ui.label(egui::RichText::new(if sim.paused { "paused" } else { "running" }).size(10.5).color(MUTED));
                 }
@@ -128,8 +184,13 @@ pub fn bottom_bar(mut contexts: EguiContexts, ui_state: Res<UiState>, mut sim: R
             }
             ui.separator();
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new(sim.universe.date_label()).size(17.0).strong());
-                ui.label(egui::RichText::new(format!("{} since observation began", format_duration(sim.universe.time - sim.universe.start_time))).size(10.5).color(MUTED));
+                let u = &sim.universe;
+                // Human-scale speeds get a calendar clock; geological ones a year count.
+                let clock = if u.gregorian() && sim.rate() < 1000.0 * cosmogon_sim::time::SECONDS_PER_YEAR { cosmogon_sim::time::format_datetime(u.time) } else { u.date_label() };
+                ui.label(egui::RichText::new(clock).size(17.0).strong());
+                let dynamic = rig.focus.map(|f| u.system(f.system()).is_dynamic()).unwrap_or(false);
+                let model = if dynamic { "N-body gravity" } else { "Kepler orbits" };
+                ui.label(egui::RichText::new(format!("{} elapsed · {model}", format_duration(u.time - u.start_time))).size(10.5).color(MUTED));
             });
             ui.separator();
             ui.checkbox(&mut settings.auto_slow, "").on_hover_text("Slow down automatically for milestones");
@@ -167,17 +228,17 @@ pub fn toasts(mut contexts: EguiContexts, mut sim: ResMut<Sim>, mut rig: ResMut<
     let now = time.elapsed_secs_f64();
     let toasts = sim.toasts.clone();
     let mut go = None;
-    for (i, t) in toasts.iter().enumerate() {
-        let age = (now - t.born) as f32;
-        let alpha = (1.0 - ((age - 7.5) / 1.5).clamp(0.0, 1.0)) * (age / 0.3).clamp(0.0, 1.0);
-        egui::Area::new(egui::Id::new(("toast", i)))
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 54.0 + i as f32 * 74.0))
-            .show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("toasts")).anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 54.0)).interactable(true).show(ctx, |ui| {
+        for t in toasts.iter() {
+            let age = (now - t.born) as f32;
+            let alpha = (1.0 - ((age - 7.5) / 1.5).clamp(0.0, 1.0)) * (age / 0.3).clamp(0.0, 1.0);
+            ui.scope(|ui| {
                 ui.set_opacity(alpha);
                 egui::Frame::new().fill(egui::Color32::from_rgba_premultiplied(18, 16, 10, 240)).stroke(egui::Stroke::new(1.0_f32, ACCENT)).corner_radius(8).inner_margin(12).show(ui, |ui| {
-                    ui.set_width(440.0);
+                    ui.set_width(520.0);
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
+                            ui.set_width(450.0);
                             ui.label(egui::RichText::new(&t.title).strong().color(ACCENT));
                             ui.label(egui::RichText::new(&t.detail).size(11.5).color(TEXT));
                         });
@@ -187,7 +248,9 @@ pub fn toasts(mut contexts: EguiContexts, mut sim: ResMut<Sim>, mut rig: ResMut<
                     });
                 });
             });
-    }
+            ui.add_space(6.0);
+        }
+    });
     if let Some(t) = go {
         sim.selected = Some(t);
         rig.focus_on(t, &sim, None);
@@ -234,7 +297,7 @@ pub fn overlays_windows(
                 super::kv(ui, "Altitude above ground", super::distance(rig.distance - rig.ground_radius));
                 if let Some(f) = rig.focus {
                     let center = crate::camera::target_info(&sim, f).0;
-                    let star = crate::render::to_render(sim.universe.system(f.system()).position);
+                    let star = crate::render::to_render(sim.universe.system(f.system()).star_position(sim.universe.time));
                     let up = (view.origin - center).normalize();
                     let sun = (star - center).normalize();
                     super::kv(ui, "Sun elevation at camera", format!("{:.1}°", up.dot(sun).clamp(-1.0, 1.0).asin().to_degrees()));
@@ -258,7 +321,9 @@ pub fn overlays_windows(
                     ("Space", "Pause / resume"),
                     (", and .", "Slower / faster"),
                     ("Tab", "Hide the interface"),
-                    ("Ctrl/⌘ + S", "Quick save"),
+                    ("Ctrl/⌘ + S", "Save sandbox"),
+                    ("Ctrl/⌘ + Z / ⇧Z", "Undo / redo an edit"),
+                    ("Ctrl/⌘ + K", "Command palette"),
                     ("F3", "Developer overlay"),
                     ("Esc", "Menu"),
                 ] {
@@ -273,39 +338,82 @@ pub fn overlays_windows(
     if ui_state.pause_menu {
         let mut close = false;
         egui::Window::new("Cosmogon").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-            ui.set_width(300.0);
-            let w = egui::vec2(280.0, 30.0);
+            ui.set_width(320.0);
+            let w = egui::vec2(300.0, 30.0);
             if ui.add(egui::Button::new("Resume").min_size(w)).clicked() {
                 close = true;
             }
-            if ui.add(egui::Button::new("Save").min_size(w)).clicked() {
-                let stem = sim.save_name.replace(['/', '\\', ':', '#', ' ', '—'], "_");
-                match sim.save(&stem, now) {
-                    Ok(_) => close = true,
-                    Err(e) => sim.status = Some((format!("Save failed: {e}"), now)),
+            if sim.is_reference() {
+                if ui.add(egui::Button::new("Clone to sandbox…").min_size(w)).clicked() {
+                    ui_state.clone_dialog = Some("My Solar System experiment".into());
+                    close = true;
+                }
+            } else {
+                if ui.add(egui::Button::new("Save").min_size(w)).clicked() {
+                    match sim.save(now) {
+                        Ok(_) => close = true,
+                        Err(e) => sim.status = Some((format!("Save failed: {e}"), now)),
+                    }
+                }
+                if ui.add(egui::Button::new("Save as new sandbox…").min_size(w)).clicked() {
+                    ui_state.save_as_dialog = Some(format!("{} (branch)", sim.session.title()));
+                    close = true;
+                }
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut ui_state.checkpoint_label).hint_text("Checkpoint name").desired_width(190.0));
+                    if ui.button("Create checkpoint").clicked() {
+                        let label = if ui_state.checkpoint_label.trim().is_empty() { sim.universe.date_label() } else { ui_state.checkpoint_label.trim().to_string() };
+                        let u = sim.universe.clone();
+                        if let crate::sim::Session::Sandbox(m) = &mut sim.session {
+                            match crate::persistence::create_checkpoint(m, &u, &label) {
+                                Ok(()) => sim.status = Some((format!("Checkpoint “{label}” saved"), now)),
+                                Err(e) => sim.status = Some((format!("Checkpoint failed: {e}"), now)),
+                            }
+                        }
+                        ui_state.checkpoint_label.clear();
+                    }
+                });
+                let checkpoints = match &sim.session {
+                    crate::sim::Session::Sandbox(m) => m.checkpoints.iter().map(|c| (c.label.clone(), c.sim_date.clone(), m.dir().join(&c.file))).collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                };
+                if !checkpoints.is_empty() {
+                    ui.label(egui::RichText::new("CHECKPOINTS").size(10.5).color(ACCENT));
+                    for (label, date, path) in checkpoints.iter().rev().take(8) {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(format!("{label} — {date}")).size(11.5));
+                            if ui.small_button("Restore").on_hover_text("Undoable").clicked() {
+                                match crate::persistence::load_universe_file(path) {
+                                    Ok(u) => {
+                                        sim.replace_universe(u, &format!("Restored checkpoint “{label}”"), now);
+                                        close = true;
+                                    }
+                                    Err(e) => sim.status = Some((format!("Restore failed: {e}"), now)),
+                                }
+                            }
+                        });
+                    }
                 }
             }
-            if ui.add(egui::Button::new("Load…").min_size(w)).clicked() {
+            if ui.add(egui::Button::new("Open another sandbox…").min_size(w)).clicked() {
+                let _ = sim.autosave();
+                ui_state.sandboxes = crate::persistence::list_sandboxes();
                 ui_state.saves = list_saves();
                 ui_state.menu = super::MenuScreen::Load;
                 next.set(AppState::MainMenu);
                 close = true;
             }
-            if ui.add(egui::Button::new("New universe…").min_size(w)).clicked() {
-                ui_state.menu = super::MenuScreen::NewUniverse;
-                next.set(AppState::MainMenu);
-                close = true;
-            }
             ui.separator();
-            super::menu::settings_ui(ui, &mut settings);
+            super::home::settings_ui(ui, &mut settings);
             ui.separator();
-            if ui.add(egui::Button::new("Main menu").min_size(w)).clicked() {
+            if ui.add(egui::Button::new("Home").min_size(w)).clicked() {
+                let _ = sim.autosave();
                 ui_state.menu = super::MenuScreen::Home;
                 next.set(AppState::MainMenu);
                 close = true;
             }
             if ui.add(egui::Button::new("Quit to desktop").min_size(w)).clicked() {
-                let _ = sim.save("autosave", now);
+                let _ = sim.autosave();
                 exit.write(AppExit::Success);
             }
         });

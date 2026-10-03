@@ -1,4 +1,4 @@
-# Cosmogon 0.3.0 — "Living worlds, rival nations"
+# Cosmogon 0.4.0 — "Sandbox Foundation"
 
 A free, open-source simulator of a living universe: stars, planets, life and civilizations
 that discover technology through causes rather than timers.
@@ -6,9 +6,9 @@ that discover technology through causes rather than timers.
 ## Downloads
 | Platform | File | Notes |
 |---|---|---|
-| macOS 11+ (Apple Silicon & Intel) | `Cosmogon-0.3.0-macOS.dmg` | Open, drag Cosmogon to Applications. |
-| Windows 10/11 (64-bit) | `Cosmogon-0.3.0-Windows-Setup.exe` | Installer with Start-menu shortcut. |
-| Windows 10/11 (64-bit) | `Cosmogon-0.3.0-Windows.exe` | Portable: just run it. |
+| macOS 11+ (Apple Silicon & Intel) | `Cosmogon-0.4.0-macOS.dmg` | Open, drag Cosmogon to Applications. |
+| Windows 10/11 (64-bit) | `Cosmogon-0.4.0-Windows-Setup.exe` | Installer with Start-menu shortcut. |
+| Windows 10/11 (64-bit) | `Cosmogon-0.4.0-Windows.exe` | Portable: just run it. |
 | Linux x86-64 | `Cosmogon-linux-x86_64.tar.gz` | Extract and run `cosmogon`. |
 
 Nothing else needs to be installed. A GPU with Metal, Vulkan or DirectX 12 is required.
@@ -22,15 +22,20 @@ warns the first time:
 * **Windows:** SmartScreen → **More info** → **Run anyway**.
 
 ## What's new
-* **Real Earth.** The Sol scenario uses NOAA ETOPO5 relief: real continents, mountains and sea
-  floors. Humanity begins in East Africa and spreads by walking, rafts and ships.
-* **Rival nations.** Chiefdoms, kingdoms, empires, republics and federations form from
-  geography, fight border wars, capture cities, unite, fracture in civil wars — and may, rarely,
-  become a world government. Territories are coloured on the map.
-* **Close-up terrain.** Fly down to a few hundred metres above any rocky world: a level-of-detail
-  quadtree of real 3D relief with mountain ranges, crater fields on airless worlds and haze.
-* **Geological speed with civilizations.** Societies are simulated at the level of detail they
-  need, so millions of years per second stay possible after intelligence appears.
-* **Same universe everywhere.** A seed now produces bit-identical results on every computer and
-  operating system (verified in CI on macOS, Windows and Linux).
-* Fixes: airless worlds were drawn black; Mars and other dry worlds were drawn as ice.
+* **A universe sandbox.** A new home screen with New Sandbox (seven templates), Continue, Load,
+  Real Universe and Scenarios. Every experiment is saved in its own folder with autosave,
+  checkpoints, duplicates and thumbnails.
+* **The real Solar System, today.** The Solar System Lab starts from NASA/JPL Horizons positions
+  and velocities for 1 January 2026. Run it for a year and the planets land within kilometres of
+  where JPL says they will be.
+* **Real gravity.** Dynamic N-body physics: add a planet and every other planet feels it.
+  Collisions merge bodies; close encounters are integrated accurately; presets from Fast to Research.
+* **Create and launch.** Add planets, moons, giants, dwarf planets, asteroids and comets; throw
+  them at a target and see the predicted path — and any impact — before you release.
+* **Edit anything, undo anything.** Mass, radius, gravity, day length, tilt, orbit, atmosphere,
+  water, the Sun's mass and age — in your choice of units, with every value labelled MEASURED,
+  DERIVED, ESTIMATED, PROCEDURAL or USER MODIFIED.
+* **Consequences.** Move a planet or change the Sun and its climate, habitability and
+  civilizations respond. Impacts leave craters, cause impact winters and mass extinctions.
+* **Scenarios.** No Moon · 2× Jupiter · a brighter Sun · Chicxulub today · a rogue planet ·
+  two moons · Mars with Earth's air.

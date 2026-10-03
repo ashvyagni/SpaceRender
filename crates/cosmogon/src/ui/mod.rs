@@ -2,10 +2,14 @@
 //! (select, focus, speed, save…); it never mutates the simulation model directly.
 
 mod charts;
+pub mod home;
 mod hud;
 mod inspect;
 mod markers;
-mod menu;
+mod tools;
+pub mod units;
+
+pub use home::MenuScreen;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -35,18 +39,12 @@ pub enum BodyTab {
     #[default]
     Overview,
     Orbit,
+    Physics,
     Environment,
     Life,
     Civilization,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum MenuScreen {
-    #[default]
-    Home,
-    NewUniverse,
-    Load,
-    Settings,
+    History,
+    Data,
 }
 
 #[derive(Resource)]
@@ -62,10 +60,26 @@ pub struct UiState {
     pub search: String,
     pub chronicle_min_importance: u8,
     pub menu: MenuScreen,
-    pub new_universe: cosmogon_sim::UniverseSettings,
-    pub life_preset: usize,
+    pub form: home::NewForm,
     pub saves: Vec<crate::persistence::SaveEntry>,
+    pub sandboxes: Vec<crate::persistence::SandboxEntry>,
+    pub rename: Option<(String, String)>,
+    pub confirm_delete: Option<String>,
+    pub open_checkpoints: Option<String>,
+    pub intro_started: Option<f64>,
+    pub intro_skipped: bool,
     pub tech_filter_blocked: bool,
+    /// Sandbox tool windows.
+    pub create_open: bool,
+    pub create: tools::CreateForm,
+    pub physics_open: bool,
+    pub palette_open: bool,
+    pub palette_query: String,
+    pub palette_index: usize,
+    pub clone_dialog: Option<String>,
+    pub save_as_dialog: Option<String>,
+    pub checkpoint_label: String,
+    pub impulse: [f64; 3],
 }
 
 impl Default for UiState {
@@ -82,10 +96,25 @@ impl Default for UiState {
             search: String::new(),
             chronicle_min_importance: 4,
             menu: MenuScreen::Home,
-            new_universe: cosmogon_sim::UniverseSettings { seed: 2026, scenario: cosmogon_sim::Scenario::GardenWorld, ..Default::default() },
-            life_preset: 0,
+            form: home::NewForm::default(),
             saves: Vec::new(),
+            sandboxes: Vec::new(),
+            rename: None,
+            confirm_delete: None,
+            open_checkpoints: None,
+            intro_started: None,
+            intro_skipped: false,
             tech_filter_blocked: false,
+            create_open: false,
+            create: tools::CreateForm::default(),
+            physics_open: false,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_index: 0,
+            clone_dialog: None,
+            save_as_dialog: None,
+            checkpoint_label: String::new(),
+            impulse: [0.0; 3],
         }
     }
 }
@@ -97,16 +126,16 @@ impl Plugin for UiPlugin {
         app.init_resource::<UiState>()
             .add_systems(Startup, init_ui_state)
             .add_systems(EguiPrimaryContextPass, apply_theme)
-            .add_systems(EguiPrimaryContextPass, (menu::main_menu).after(apply_theme).run_if(in_state(AppState::MainMenu)))
-            .add_systems(EguiPrimaryContextPass, (menu::generating).after(apply_theme).run_if(in_state(AppState::Generating)))
+            .add_systems(EguiPrimaryContextPass, (home::main_menu).after(apply_theme).run_if(in_state(AppState::MainMenu)))
+            .add_systems(EguiPrimaryContextPass, (home::generating).after(apply_theme).run_if(in_state(AppState::Generating)))
             .add_systems(
                 EguiPrimaryContextPass,
-                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, inspect::left_panel, inspect::right_panel, hud::toasts, hud::overlays_windows)
+                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows)
                     .chain()
                     .after(apply_theme)
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             )
-            .add_plugins(menu::MenuScenePlugin);
+            .add_plugins(home::MenuScenePlugin);
     }
 }
 
@@ -115,6 +144,31 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
     ui.debug = args.debug;
     if args.select_civ {
         ui.body_tab = BodyTab::Civilization;
+    }
+    ui.menu = match args.menu.as_deref() {
+        Some("new") => MenuScreen::NewSandbox,
+        Some("load") => MenuScreen::Load,
+        Some("scenarios") => MenuScreen::Scenarios,
+        Some("settings") => MenuScreen::Settings,
+        Some("credits") => MenuScreen::Credits,
+        _ => MenuScreen::Home,
+    };
+    if ui.menu == MenuScreen::Load {
+        ui.sandboxes = crate::persistence::list_sandboxes();
+        ui.saves = crate::persistence::list_saves();
+    }
+    if args.menu.is_some() {
+        ui.intro_skipped = true;
+    }
+    match args.panel.as_deref() {
+        Some("create") => ui.create_open = true,
+        Some("physics") => ui.physics_open = true,
+        Some("palette") => ui.palette_open = true,
+        _ => {}
+    }
+    // Automated captures and dev starts skip the intro.
+    if args.capture.is_some() || args.new.is_some() || args.load.is_some() {
+        ui.intro_skipped = true;
     }
 }
 

@@ -54,7 +54,7 @@ pub fn draw_markers(
         let mut v = Vec::new();
         if let Some(f) = rig.focus {
             let sys = u.system(f.system());
-            for (i, b) in sys.bodies.iter().enumerate() {
+            for (i, b) in sys.bodies.iter().enumerate().filter(|(_, b)| b.exists()) {
                 let p = to_render(sys.body_position(i, u.time));
                 if view.screen_radius(p, b.radius) > 12.0 {
                     v.push((p, b.radius));
@@ -95,9 +95,9 @@ pub fn draw_markers(
 
     // Star systems.
     for sys in &u.systems {
-        let pos = to_render(sys.position);
+        let pos = to_render(sys.star_position(t));
         let d = (pos - view.origin).length();
-        let extent = sys.bodies.iter().filter(|b| b.parent.is_none()).map(|b| b.orbit.apoapsis()).fold(1e11, f64::max);
+        let extent = sys.bodies.iter().filter(|b| b.parent.is_none() && b.exists()).map(|b| b.orbit.apoapsis().min(1.5e13)).fold(1e11, f64::max);
         let Some(sp) = project(pos) else { continue };
         let has_civ = u.civs.iter().any(|c| c.system == sys.id && c.is_alive());
         let has_life = u.biospheres.iter().any(|b| b.system == sys.id && b.stage >= Stage::Microbial);
@@ -122,6 +122,9 @@ pub fn draw_markers(
     if let Some(sid) = focus_sys {
         let sys = u.system(sid);
         for (i, b) in sys.bodies.iter().enumerate() {
+            if !b.exists() {
+                continue;
+            }
             let r = BodyRef { system: sid, body: i as u32 };
             let pos = to_render(sys.body_position(i, t));
             let Some(sp) = project(pos) else { continue };

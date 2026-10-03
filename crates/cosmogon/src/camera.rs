@@ -75,7 +75,7 @@ impl CameraRig {
 /// A distance from which a whole star system fits on screen.
 pub fn system_view_distance(sim: &Sim, system: u32) -> f64 {
     let sys = sim.universe.system(system);
-    let extent = sys.bodies.iter().filter(|b| b.parent.is_none()).map(|b| b.orbit.apoapsis()).fold(0.5 * AU, f64::max);
+    let extent = sys.bodies.iter().filter(|b| b.parent.is_none() && b.exists()).map(|b| b.orbit.apoapsis().min(200.0 * AU)).fold(0.5 * AU, f64::max);
     extent * 2.6
 }
 
@@ -85,7 +85,7 @@ pub fn target_info(sim: &Sim, target: Target) -> (DVec3, f64) {
     match target {
         Target::Star(s) => {
             let sys = u.system(s);
-            (to_render(sys.position), sys.star.current_radius(u.time))
+            (to_render(sys.star_position(u.time)), sys.star.current_radius(u.time))
         }
         Target::Body(r) => (to_render(u.body_position(r, u.time)), u.body(r).radius),
     }
@@ -169,7 +169,7 @@ fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Arg
         let rot = crate::render::body_rotation(&sim, r, sim.universe.time).as_dquat();
         // "noon" = the longitude currently facing the star.
         let lon = if lon.is_nan() {
-            let star = rot.inverse() * (to_render(sim.universe.system(r.system).position) - pos);
+            let star = rot.inverse() * (to_render(sim.universe.system(r.system).star_position(sim.universe.time)) - pos);
             star.y.atan2(star.x).to_degrees() - 55.0
         } else {
             lon
@@ -180,7 +180,7 @@ fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Arg
         rig.pitch = d.y.asin();
     } else if args.yaw.is_none() {
         // Start on the day side, the star a little off to one side.
-        let star = to_render(sim.universe.system(target.system()).position);
+        let star = to_render(sim.universe.system(target.system()).star_position(sim.universe.time));
         let d = (star - pos).normalize_or(DVec3::Z);
         rig.yaw = d.x.atan2(d.z) + 0.55;
         rig.pitch = d.y.asin() + 0.25;
@@ -281,7 +281,15 @@ fn update_camera(
     settings: Res<UserSettings>,
 ) {
     let dt = time.delta_secs().min(0.1);
-    let Some(focus) = rig.focus else { return };
+    let Some(mut focus) = rig.focus else { return };
+    // The focused body may have been destroyed or deleted: fall back to its star.
+    if let Target::Body(r) = focus {
+        let gone = sim.universe.systems.get(r.system as usize).and_then(|s| s.bodies.get(r.body as usize)).is_none_or(|b| !b.exists());
+        if gone {
+            focus = Target::Star(r.system);
+            rig.focus_on(focus, &sim, None);
+        }
+    }
     let (live_pos, radius) = target_info(&sim, focus);
     rig.focus_radius = radius;
     // Ground under the camera: real terrain height when close-up terrain is active.

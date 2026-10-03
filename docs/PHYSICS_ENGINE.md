@@ -145,8 +145,35 @@ From `cargo test -p cosmogon_physics nbody -- --nocapture`:
 | Head-on impact at 20 km/s with a 6-hour step | detected; momentum conserved | ✅; < 10⁻⁹ |
 | Mercury with 1PN | perihelion advance | 43 ± 1.5″/century |
 
+### Against JPL's own ephemeris
+
+`astro::horizons::tests::one_year_matches_jpl_ephemeris` starts from the JPL Horizons
+state of 2026-01-01 (Accurate preset), integrates 365 days and compares heliocentric
+positions with Horizons for 2027-01-01:
+
+| Body | Error after one year |
+|---|---|
+| Venus, Mars, Jupiter, Saturn, Uranus, Neptune | ≤ 6 km |
+| Mercury | 95 km |
+| Earth | ~590 km |
+| Moon | ~790 km |
+
+The Earth–Moon residual is not yet attributed (candidates: the asteroid belt, Earth and
+Moon oblateness, tides — none are modelled). Giant planets use their *system barycentres*
+because their moons ride rails; using the planet centre instead costs ~50 000 km per year
+(the centre wobbles ~1–2 m/s around the barycentre).
+
 Analytic checks elsewhere: Earth orbital period, escape velocity, surface gravity, Hill
-sphere, Lagrange points, Roche limit, equilibrium temperature (see `cosmogon_sim::validation`).
+sphere, Lagrange points, Roche limit, equilibrium temperature, crater scaling against
+Meteor Crater and Chicxulub-class inputs.
+
+## Performance (measured, Apple M-series, release build)
+
+| Case | Cost |
+|---|---|
+| Solar System Lab (Sun, 8 planets, Moon active; 6 rails moons), Balanced | ~560 simulated years per CPU-second (`cosmogon-cli run --scenario lab --years 100`: 177 ms) |
+| Same, inside the app (9 ms per frame budget) | ≈ 300 yr/s before *CPU-limited* |
+| One-year trajectory prediction (background thread) | a few ms |
 
 ## Known limitations
 
