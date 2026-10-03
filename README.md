@@ -6,9 +6,11 @@ timers, and change their planets in ways you can see from orbit.
 
 ![Main menu](docs/images/menu.jpg)
 
-| Humanity in an alternative 2300 CE | The night side of an industrial world |
+| Rival nations on the real Earth, 4000 CE | The night side of an industrial world |
 |---|---|
-| ![Civilization](docs/images/sol_modern.jpg) | ![City lights](docs/images/sol_night3.jpg) |
+| ![Nations](docs/images/nations_real_earth.jpg) | ![City lights](docs/images/sol_night3.jpg) |
+| **Mars** | **Close-up terrain: a crater field on Mars** |
+| ![Mars](docs/images/mars.jpg) | ![Terrain](docs/images/mars_closeup.jpg) |
 
 ## Download
 Get the latest **macOS `.dmg`** or **Windows `.exe`** from
