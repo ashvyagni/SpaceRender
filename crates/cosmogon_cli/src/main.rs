@@ -71,6 +71,7 @@ fn main() {
         "run" => run(&a),
         "check" => check(&a),
         "survey" => survey(&a),
+        "profile" => profile(&a),
         c => eprintln!("unknown command {c}; use run | check | survey"),
     }
 }
@@ -159,4 +160,21 @@ fn survey(a: &Args) {
         println!("seed {seed:>3}: civs {} (most techs {best}), events {}", u.civs.len(), u.history.events.len());
     }
     println!("\nuniverses with microbial life {life}/{0}, complex life {complex}/{0}, intelligence {intelligent}/{0}", a.seeds);
+}
+
+/// Advance in chunks and report wall time per chunk with each civilization's step size.
+fn profile(a: &Args) {
+    let mut u = Universe::new(settings(a, a.seed));
+    let chunk = (a.years / 40.0).max(1.0) * SECONDS_PER_YEAR;
+    let end = u.start_time + a.years * SECONDS_PER_YEAR;
+    while u.time < end {
+        let t0 = Instant::now();
+        let r = u.advance_to((u.time + chunk).min(end), None, None);
+        let civs: Vec<String> = u
+            .civs
+            .iter()
+            .map(|c| format!("{}:{:?} stride {} pop {} techs {} press f{:.2} d{:.2} w{:.2} short {:.2} cap% {:.0}", c.species.name, c.status, c.stride_years, cosmogon_sim::time::group_digits(c.population), c.discoveries.len(), c.pressures.food, c.pressures.disease, c.pressures.war, c.energy_shortfall, 100.0 * c.population / c.capacity.max(1.0)))
+            .collect();
+        println!("{:>14} {:>8.1?} steps {:>9}  {}", format_duration(u.time - u.start_time), t0.elapsed(), r.steps, civs.join(" | "));
+    }
 }

@@ -416,12 +416,16 @@ impl Universe {
                 break;
             }
             let k = self.scheduler.tasks[task].steps;
+            let mut skip = None;
             match task {
                 TASK_BIOSPHERE => self.step_biospheres(due, k),
-                TASK_CIV => self.step_civs(due, k),
+                TASK_CIV => skip = Some(self.step_civs(due, k)),
                 _ => {}
             }
             self.scheduler.complete(task);
+            if let Some(next_k) = skip {
+                self.scheduler.skip_to(TASK_CIV, next_k);
+            }
             self.time = due;
             report.steps += 1;
             if let Some(min) = stop_at_importance {
@@ -489,7 +493,8 @@ impl Universe {
     fn spawn_civilization(&mut self, r: BodyRef, t: f64) {
         let mut rng = Rng::stream(self.settings.seed, domain::SPECIES, &[r.system as u64, r.body as u64, self.civs.len() as u64]);
         let species = Species::generate(&mut rng, self.body(r));
-        let civ = self.make_civ(r, species, t);
+        let mut civ = self.make_civ(r, species, t);
+        civ.next_k = self.scheduler.tasks.get(TASK_CIV).map(|task| task.steps).unwrap_or(0);
         if let Some(bio) = self.biospheres.iter_mut().find(|b| b.system == r.system && b.body == r.body) {
             bio.civilization_present = true;
         }
@@ -507,16 +512,19 @@ impl Universe {
         self.civs.push(civ);
     }
 
-    fn step_civs(&mut self, t: f64, k: u64) {
+    /// Step every civilization that is due. Returns the task index at which the next
+    /// civilization is due, so empty or quiet stretches cost nothing.
+    fn step_civs(&mut self, t: f64, k: u64) -> u64 {
         let graph = TechGraph::embedded();
         let seed = self.settings.seed;
         for ci in 0..self.civs.len() {
-            if !self.civs[ci].is_alive() {
+            if !self.civs[ci].is_alive() || self.civs[ci].next_k > k {
                 continue;
             }
+            let dt = self.civs[ci].stride_years.max(1) as f64;
             let (s, b) = (self.civs[ci].system as usize, self.civs[ci].body as usize);
             let r = BodyRef { system: s as u32, body: b as u32 };
-            if k % 10 == 0 {
+            if k % 10 == 0 || dt >= 10.0 {
                 refresh_climate(&mut self.systems[s], b, t);
                 let vegetated = self.biosphere(r).is_some_and(|x| x.vegetated());
                 refresh_derived_resources(&mut self.systems[s].bodies[b], vegetated);
@@ -539,7 +547,10 @@ impl Universe {
             };
             let mut rng = Rng::stream(seed, domain::CIV_STEP, &[ci as u64, k]);
             let body = &mut self.systems[s].bodies[b];
-            let events = self.civs[ci].step_year(body, &world, graph, t, k, &mut rng);
+            let events = self.civs[ci].step(body, &world, graph, t, dt, &mut rng);
+            let stride = self.civs[ci].choose_stride(t);
+            self.civs[ci].stride_years = stride;
+            self.civs[ci].next_k = k + stride as u64;
             for e in events {
                 self.history.push(Event { time: t, category: e.category, importance: e.importance, title: e.title, detail: e.detail, system: Some(s as u32), body: Some(b as u32), civ: Some(ci as u32) });
             }
@@ -552,7 +563,16 @@ impl Universe {
             }
         }
         self.step_contact(t);
-        self.step_probes(t, k);
+        self.step_probes(t);
+        // Next due civilization; with none alive, sleep until the next biosphere step (the
+        // only place a new one can appear).
+        match self.civs.iter().filter(|c| c.is_alive()).map(|c| c.next_k).min() {
+            Some(next) => next.max(k + 1),
+            None => {
+                let next_bio = self.scheduler.tasks[TASK_BIOSPHERE].next_due();
+                self.scheduler.index_at_or_after(TASK_CIV, next_bio).max(k + 1)
+            }
+        }
     }
 
     /// Radio signals expand at light speed; civilizations with radio astronomy hear them.
@@ -587,12 +607,14 @@ impl Universe {
         }
     }
 
-    fn step_probes(&mut self, t: f64, k: u64) {
+    fn step_probes(&mut self, t: f64) {
         for ci in 0..self.civs.len() {
             let c = &self.civs[ci];
-            if !c.is_alive() || !c.flags.contains("probes") || k % 200 != 0 {
+            if !c.is_alive() || !c.flags.contains("probes") || (t - c.probe_timer) < 200.0 * SECONDS_PER_YEAR {
                 continue;
             }
+            self.civs[ci].probe_timer = t;
+            let c = &self.civs[ci];
             let home = self.systems[c.system as usize].position;
             let targeted: Vec<u32> = self.probes.iter().filter(|p| p.civ == ci as u32).map(|p| p.to).collect();
             let target = self

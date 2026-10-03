@@ -62,9 +62,10 @@ impl Pressures {
             _ => 0.0,
         }
     }
-    fn decay(&mut self) {
+    fn decay(&mut self, dt: f64) {
+        let k = 0.985f64.dpowf(dt);
         for p in [&mut self.food, &mut self.disease, &mut self.energy, &mut self.war, &mut self.contact] {
-            *p *= 0.985;
+            *p *= k;
         }
     }
 }
@@ -172,6 +173,22 @@ pub struct Civilization {
     pub samples: Samples,
     pub collapses: u32,
 
+    // Level of detail: a civilization is stepped every `stride_years`, chosen from its own
+    // state (fast-changing societies yearly, stable ones every 10 or 100 years).
+    #[serde(default = "one_u32")]
+    pub stride_years: u32,
+    /// Civilization-task step index at which this civilization is next due.
+    #[serde(default)]
+    pub next_k: u64,
+    #[serde(default)]
+    pub last_discovery: f64,
+    #[serde(default)]
+    pub settlement_timer: f64,
+    #[serde(default)]
+    pub colony_timer: f64,
+    #[serde(default)]
+    pub probe_timer: f64,
+
     #[serde(skip)]
     known_cache: KnownCache,
     #[serde(skip)]
@@ -188,7 +205,21 @@ impl PartialEq for KnownCache {
     }
 }
 
-/// What a civilization's yearly step reports back to the universe.
+fn one_u32() -> u32 {
+    1
+}
+
+/// Probability that an event with yearly probability `p` happens at least once in `dt` years.
+fn over(p: f64, dt: f64) -> f64 {
+    1.0 - (1.0 - p.clamp(0.0, 1.0)).dpowf(dt)
+}
+
+/// Fraction remaining of a quantity relaxing at yearly rate `k` after `dt` years.
+fn relax(k: f64, dt: f64) -> f64 {
+    1.0 - (1.0 - k).dpowf(dt)
+}
+
+/// What a civilization's step reports back to the universe.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CivEvent {
     pub importance: u8,
@@ -277,6 +308,12 @@ impl Civilization {
             detected: Vec::new(),
             samples: Samples::new(t),
             collapses: 0,
+            stride_years: 1,
+            next_k: 0,
+            last_discovery: t,
+            settlement_timer: 10.0,
+            colony_timer: 0.0,
+            probe_timer: 0.0,
             known_cache: KnownCache::default(),
             adjacency: settlements::Adjacency::default(),
         }
@@ -371,15 +408,39 @@ impl Civilization {
         w.map(|x| x / s)
     }
 
-    /// One simulated year ending at `t`.
-    pub fn step_year(&mut self, body: &mut Body, world: &WorldView, graph: &TechGraph, t: f64, year_index: u64, rng: &mut Rng) -> Vec<CivEvent> {
+    /// Choose the next step size from the society's own state. Deterministic: depends only
+    /// on simulation state at a step boundary, never on frame rate or speed.
+    pub fn choose_stride(&self, t: f64) -> u32 {
+        let since = (t - self.last_discovery) / SECONDS_PER_YEAR;
+        // Only genuine crises force yearly steps; living at carrying capacity (food
+        // pressure 0.5) or a chronic small energy deficit is the normal state of a mature society.
+        let turbulent = !matches!(self.status, CivStatus::Thriving)
+            || self.pressures.food > 0.6
+            || self.pressures.disease > 0.3
+            || self.pressures.war > 0.5
+            || self.energy_shortfall > 0.3
+            || self.population < self.capacity * 0.5;
+        if turbulent || since < 300.0 {
+            1
+        } else if since < 5_000.0 {
+            10
+        } else if since < 50_000.0 {
+            100
+        } else {
+            1000
+        }
+    }
+
+    /// Advance `dt` simulated years ending at `t` (dt = 1 for fast-changing societies).
+    #[allow(clippy::too_many_arguments)]
+    pub fn step(&mut self, body: &mut Body, world: &WorldView, graph: &TechGraph, t: f64, dt: f64, rng: &mut Rng) -> Vec<CivEvent> {
         use crate::history::Category as C;
         let mut ev = Vec::new();
         if !self.is_alive() {
             return ev;
         }
         let cp = &world.params.civilization;
-        self.pressures.decay();
+        self.pressures.decay(dt);
 
         // ── Carrying capacity & population ──────────────────────────────
         let area = match self.species.habitat {
@@ -393,7 +454,9 @@ impl Civilization {
         self.capacity = area * fertility * 0.05 * (0.7 + 0.3 * stable) * self.capacity_mult * (1.0 - 0.6 * climate_stress.min(1.0)) * (1.0 - 0.5 * self.energy_shortfall);
         let r = (cp.base_growth_rate + self.growth_bonus) * (1.0 + self.health).max(0.2);
         let p = self.population;
-        self.population += r * p * (1.0 - p / self.capacity.max(1.0));
+        // Exact logistic solution over dt (stable for any step size).
+        let cap = self.capacity.max(1.0);
+        self.population = cap / (1.0 + (cap / p.max(1.0) - 1.0) * (-r * dt).dexp());
         if self.population > self.capacity * 1.02 {
             let lost = (self.population - self.capacity) * 0.3;
             self.population -= lost;
@@ -416,8 +479,11 @@ impl Civilization {
             cp.oral_knowledge_decay
         };
         let focus = self.focus();
+        // Exact solution of dK/dt = R·f − λK over dt.
+        let keep = (1.0 - decay).dpowf(dt);
         for i in 0..N_DOMAINS {
-            self.knowledge[i] += research * focus[i] - self.knowledge[i] * decay;
+            let inflow = research * focus[i];
+            self.knowledge[i] = self.knowledge[i] * keep + inflow * (1.0 - keep) / decay.max(1e-12);
         }
 
         // ── Discovery ───────────────────────────────────────────────────
@@ -431,7 +497,7 @@ impl Civilization {
                 let tech = &graph.techs[i];
                 let demand = tech.demand.as_deref().map(|d| self.pressures.get(d)).unwrap_or(0.0);
                 let rate = speed * knowledge_surplus.dpowf(1.5) * (1.0 + 2.0 * demand) * world.tech_rate / tech.years;
-                if rng.hazard(rate, 1.0) {
+                if rng.hazard(rate, dt) {
                     found.push((i, route, knowledge_surplus, demand));
                 }
             }
@@ -447,6 +513,7 @@ impl Civilization {
                 drivers.push_str(&format!("; route: {r}"));
             }
             self.apply_effects(graph, i);
+            self.last_discovery = t;
             self.known_cache.0.clear();
             self.discoveries.push(Discovery { tech: tech.id.clone(), time: t, route: route_label.clone(), drivers: drivers.clone() });
             let importance = match tech.id.as_str() {
@@ -477,32 +544,33 @@ impl Civilization {
             self.pressures.energy = self.pressures.energy.max(self.energy_shortfall * 2.0).min(1.0);
         }
         if available_fossil_w > 0.0 && reserves > 0.0 {
-            let used = available_fossil_w * SECONDS_PER_YEAR / FOSSIL_JOULES_PER_UNIT;
+            let used = available_fossil_w * SECONDS_PER_YEAR * dt / FOSSIL_JOULES_PER_UNIT;
             let coal_share = body.resources.coal / reserves;
             body.resources.coal = (body.resources.coal - used * coal_share).max(0.0);
             body.resources.oil = (body.resources.oil - used * (1.0 - coal_share)).max(0.0);
             let atm_mass_scale = body.atmosphere.pressure_bar.max(0.05) * body.radius_earths().powi(2);
-            body.atmosphere.co2 += available_fossil_w * CO2_PER_WATT_YEAR / atm_mass_scale;
+            body.atmosphere.co2 += available_fossil_w * dt * CO2_PER_WATT_YEAR / atm_mass_scale;
         }
-        body.atmosphere.co2 -= (body.atmosphere.co2 - self.baseline_co2) * 0.002;
+        body.atmosphere.co2 -= (body.atmosphere.co2 - self.baseline_co2) * relax(0.002, dt);
 
         // ── Shocks ──────────────────────────────────────────────────────
         let density_risk = (self.urbanisation * 2.0 + 0.05) * if self.population > 1e6 { 1.0 } else { 0.2 };
         let zoonotic = if self.knows("animal_domestication") { 1.5 } else { 1.0 };
-        if rng.chance(cp.pandemic_rate * density_risk * zoonotic * (1.0 - self.health).max(0.05)) {
+        if rng.chance(over(cp.pandemic_rate * density_risk * zoonotic * (1.0 - self.health).max(0.05), dt)) {
             let frac = rng.range(0.03, 0.35) * (1.0 - self.health).max(0.05);
             let dead = self.population * frac;
             self.population -= dead;
-            self.pressures.disease = 1.0;
+            // Pressure scales with how deadly it was: a mild outbreak is not a crisis.
+            self.pressures.disease = self.pressures.disease.max((frac * 4.0).min(1.0));
             self.stability -= 0.05;
             ev.push(CivEvent { importance: if frac > 0.1 { 4 } else { 3 }, category: C::Disaster, title: "Pandemic".into(), detail: format!("{:.0}% of the population ({}) dies", frac * 100.0, group_digits(dead)) });
         }
         let organised = self.sites.iter().filter(|s| s.active()).count() > 8;
-        if organised && rng.chance(cp.war_rate * (1.4 - self.stability).max(0.1) * (1.0 + self.pressures.food)) {
+        if organised && rng.chance(over(cp.war_rate * (1.4 - self.stability).max(0.1) * (1.0 + self.pressures.food), dt)) {
             let nuclear = self.flags.contains("nuclear_weapons") && self.stability < 0.35 && rng.chance(0.05);
             let frac = if nuclear { rng.range(0.3, 0.8) } else { rng.range(0.002, 0.06) };
             self.population -= self.population * frac;
-            self.pressures.war = 1.0;
+            self.pressures.war = self.pressures.war.max((frac / 0.06).min(1.0));
             self.stability -= if nuclear { 0.5 } else { 0.08 };
             if nuclear {
                 ev.push(CivEvent { importance: 5, category: C::War, title: "Nuclear war".into(), detail: format!("{:.0}% of the population is killed", frac * 100.0) });
@@ -510,7 +578,7 @@ impl Civilization {
                 ev.push(CivEvent { importance: if frac > 0.045 { 3 } else { 2 }, category: C::War, title: "Major war".into(), detail: format!("{:.1}% of the population is killed", frac * 100.0) });
             }
         }
-        if rng.chance(cp.disaster_rate * body.geology.min(3.0) * 0.2) {
+        if rng.chance(over(cp.disaster_rate * body.geology.min(3.0) * 0.2, dt)) {
             let frac = rng.range(0.0005, 0.02);
             self.population -= self.population * frac;
             if frac > 0.01 {
@@ -520,7 +588,7 @@ impl Civilization {
 
         // ── Stability & collapse ────────────────────────────────────────
         let target = self.base_stability - 0.25 * self.pressures.food - 0.2 * self.pressures.climate - 0.2 * self.energy_shortfall - 0.1 * self.pressures.war;
-        self.stability += (target - self.stability) * 0.04 + rng.normal(0.0, 0.01);
+        self.stability += (target - self.stability) * relax(0.04, dt) + rng.normal(0.0, 0.01 * dt.sqrt().min(3.0));
         self.stability = self.stability.clamp(0.0, 1.0);
         if self.stability < cp.collapse_threshold && matches!(self.status, CivStatus::Thriving) && self.population > 1e5 {
             self.collapses += 1;
@@ -539,8 +607,10 @@ impl Civilization {
         }
 
         // ── Urbanisation & settlements (every 10 years) ─────────────────
-        self.urbanisation += (self.urban_target - self.urbanisation) * 0.01;
-        if year_index % 10 == 0 {
+        self.urbanisation += (self.urban_target - self.urbanisation) * relax(0.01, dt);
+        self.settlement_timer += dt;
+        if self.settlement_timer >= 10.0 {
+            self.settlement_timer = 0.0;
             let p = settlements::SpreadParams {
                 reach: self.reach,
                 seafaring: self.flags.contains("seafaring") || self.flags.contains("aircraft"),
@@ -572,7 +642,9 @@ impl Civilization {
                 self.satellites += 1 + (target - self.satellites) / 20;
             }
         }
-        if self.flags.contains("colonies") && year_index % 25 == 0 {
+        self.colony_timer += dt;
+        if self.flags.contains("colonies") && self.colony_timer >= 25.0 {
+            self.colony_timer = 0.0;
             let settled: BTreeSet<u32> = self.colonies.iter().map(|c| c.body).collect();
             if let Some(&(target_body, _)) = world.colony_targets.iter().filter(|(b, _)| !settled.contains(b)).max_by(|a, b| a.1.total_cmp(&b.1)) {
                 if rng.chance(0.5) {
@@ -582,7 +654,8 @@ impl Civilization {
             }
         }
         for c in &mut self.colonies {
-            c.population += c.population * 0.03 * (1.0 - c.population / 2.0e6);
+            let cap = 2.0e6;
+            c.population = cap / (1.0 + (cap / c.population.max(1.0) - 1.0) * (-0.03 * dt).dexp());
         }
 
         if self.population < 500.0 {

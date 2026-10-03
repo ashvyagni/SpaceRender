@@ -45,6 +45,20 @@ impl Scheduler {
     pub fn complete(&mut self, task: usize) {
         self.tasks[task].steps += 1;
     }
+
+    /// Skip a task forward so its next run is step index `k` (never backwards). Used when a
+    /// task knows nothing will happen for a while; the decision must depend only on
+    /// simulation state so determinism is preserved.
+    pub fn skip_to(&mut self, task: usize, k: u64) {
+        let t = &mut self.tasks[task];
+        t.steps = t.steps.max(k);
+    }
+
+    /// The first step index of `task` whose due time is at or after `time`.
+    pub fn index_at_or_after(&self, task: usize, time: f64) -> u64 {
+        let t = &self.tasks[task];
+        (((time - t.origin) / t.period).ceil() - 1.0).max(0.0) as u64
+    }
 }
 
 #[cfg(test)]
