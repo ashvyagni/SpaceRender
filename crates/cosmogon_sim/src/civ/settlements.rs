@@ -6,6 +6,8 @@
 //! steepness rises with urbanisation, so villages become towns, cities and megacities.
 //! Expansion is limited by *reach*: walking, roads, rail, ships and aircraft.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use serde::{Deserialize, Serialize};
 
 use super::species::Habitat;
@@ -86,7 +88,7 @@ pub struct Link {
 }
 
 fn angle(a: [f64; 3], b: [f64; 3]) -> f64 {
-    (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).clamp(-1.0, 1.0).acos()
+    (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).clamp(-1.0, 1.0).dacos()
 }
 
 fn slerp_mid(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -104,7 +106,7 @@ pub fn candidate_sites(body: &Body, surface: &SurfaceContext, habitat: Habitat, 
     let mut out: Vec<Site> = Vec::new();
     for d in fibonacci_sphere(n) {
         let s = surface.sample(d);
-        let comfort = (-((s.temperature - 290.0) / 25.0).powi(2)).exp();
+        let comfort = (-((s.temperature - 290.0) / 25.0).powi(2)).dexp();
         let neighbours_wet = [[step, 0.0, 0.0], [-step, 0.0, 0.0], [0.0, step, 0.0], [0.0, -step, 0.0], [0.0, 0.0, step]]
             .iter()
             .any(|o| {
@@ -249,7 +251,7 @@ pub fn update(sites: &mut [Site], links: &mut Vec<Link>, adj: &Adjacency, popula
     let urban = population * p.urbanisation.clamp(0.0, 1.0);
     let rural_each = ((population - urban) / order.len().max(1) as f64).min(p.rural_cap);
     let alpha = 0.55 + 0.5 * p.urbanisation.clamp(0.0, 1.0);
-    let weights: Vec<f64> = order.iter().enumerate().map(|(rank, &i)| sites[i].score * ((rank + 1) as f64).powf(-alpha)).collect();
+    let weights: Vec<f64> = order.iter().enumerate().map(|(rank, &i)| sites[i].score * ((rank + 1) as f64).dpowf(-alpha)).collect();
     let total: f64 = weights.iter().sum::<f64>().max(1e-12);
     let mut promotions = Vec::new();
     for (k, &i) in order.iter().enumerate() {

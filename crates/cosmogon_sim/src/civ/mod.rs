@@ -5,6 +5,8 @@
 //! It is stepped once per simulated year. Everything that happens to it is explained by
 //! state you can inspect — see CIVILIZATION_MODEL.md.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 pub mod knowledge;
 pub mod settlements;
 pub mod species;
@@ -405,7 +407,7 @@ impl Civilization {
         }
 
         // ── Research ────────────────────────────────────────────────────
-        let research = cp.research_scale * self.population.max(1.0).powf(cp.research_exponent) * self.research_mult * (0.7 + 0.6 * self.species.sociality) * world.tech_rate * (0.5 + 0.5 * self.stability.clamp(0.0, 1.0));
+        let research = cp.research_scale * self.population.max(1.0).dpowf(cp.research_exponent) * self.research_mult * (0.7 + 0.6 * self.species.sociality) * world.tech_rate * (0.5 + 0.5 * self.stability.clamp(0.0, 1.0));
         let decay = if self.flags.contains("printing") {
             0.00001
         } else if self.flags.contains("writing") {
@@ -428,7 +430,7 @@ impl Civilization {
             if let Some((route, speed, knowledge_surplus)) = graph.available(i, &ctx) {
                 let tech = &graph.techs[i];
                 let demand = tech.demand.as_deref().map(|d| self.pressures.get(d)).unwrap_or(0.0);
-                let rate = speed * knowledge_surplus.powf(1.5) * (1.0 + 2.0 * demand) * world.tech_rate / tech.years;
+                let rate = speed * knowledge_surplus.dpowf(1.5) * (1.0 + 2.0 * demand) * world.tech_rate / tech.years;
                 if rng.hazard(rate, 1.0) {
                     found.push((i, route, knowledge_surplus, demand));
                 }

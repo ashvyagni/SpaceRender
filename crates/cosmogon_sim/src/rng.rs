@@ -11,6 +11,8 @@
 //!
 //! The generator is SplitMix64: pure integer arithmetic, identical on every platform.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 /// Stream domains. Never renumber existing values — that would change every universe.
 pub mod domain {
     pub const GALAXY: u64 = 1;
@@ -100,24 +102,24 @@ impl Rng {
 
     /// Log-uniform in `[lo, hi]` (both > 0).
     pub fn log_uniform(&mut self, lo: f64, hi: f64) -> f64 {
-        (lo.ln() + (hi.ln() - lo.ln()) * self.f64()).exp()
+        (lo.dln() + (hi.dln() - lo.dln()) * self.f64()).dexp()
     }
 
     /// Standard normal via Box–Muller.
     pub fn normal(&mut self, mean: f64, sd: f64) -> f64 {
         let u1 = self.f64().max(1e-300);
         let u2 = self.f64();
-        mean + sd * (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+        mean + sd * (-2.0 * u1.dln()).sqrt() * (std::f64::consts::TAU * u2).dcos()
     }
 
     /// Rayleigh-distributed value with scale `sigma`.
     pub fn rayleigh(&mut self, sigma: f64) -> f64 {
-        sigma * (-2.0 * (1.0 - self.f64()).max(1e-300).ln()).sqrt()
+        sigma * (-2.0 * (1.0 - self.f64()).max(1e-300).dln()).sqrt()
     }
 
     /// Poisson sample (Knuth; fine for small lambda).
     pub fn poisson(&mut self, lambda: f64) -> u32 {
-        let l = (-lambda).exp();
+        let l = (-lambda).dexp();
         let mut k = 0u32;
         let mut p = 1.0;
         loop {
@@ -134,7 +136,7 @@ impl Rng {
         if rate <= 0.0 || dt <= 0.0 {
             return false;
         }
-        self.f64() < 1.0 - (-rate * dt).exp()
+        self.f64() < 1.0 - (-rate * dt).dexp()
     }
 
     /// Pick an index with probability proportional to `weights`.

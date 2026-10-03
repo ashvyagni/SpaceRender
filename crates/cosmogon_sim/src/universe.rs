@@ -1,5 +1,7 @@
 //! The universe: owner of all simulation state and the single entry point for advancing it.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -135,7 +137,7 @@ fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
 /// Fertile land and fresh water follow from climate and the biosphere.
 fn refresh_derived_resources(body: &mut Body, vegetated: bool) {
     let land = body.land_fraction() / 0.29;
-    let temperate = (-((body.temperature - 288.0) / 25.0).powi(2)).exp();
+    let temperate = (-((body.temperature - 288.0) / 25.0).powi(2)).dexp();
     let liquid = body.hydro.ocean_fraction > 0.0;
     body.resources.fertile_land = if liquid { land.min(2.5) * temperate * if vegetated { 1.0 } else { 0.05 } } else { 0.0 };
     body.resources.fresh_water = if liquid { body.hydro.water_inventory.sqrt().min(1.5) } else if body.hydro.ice_fraction > 0.0 { 0.1 } else { 0.0 };
@@ -514,7 +516,7 @@ impl Universe {
                 .iter()
                 .enumerate()
                 .filter(|(i, x)| *i != b && x.kind.has_surface() && x.mass > 1e21)
-                .map(|(i, x)| (i as u32, 1.0 / (1.0 + (x.gravity_g() - 0.7).abs()) * (-((x.temperature - 250.0) / 120.0).powi(2)).exp()))
+                .map(|(i, x)| (i as u32, 1.0 / (1.0 + (x.gravity_g() - 0.7).abs()) * (-((x.temperature - 250.0) / 120.0).powi(2)).dexp()))
                 .collect();
             let world = WorldView {
                 env: environment_for(&sys.bodies[b], moons, colony_targets.len(), t),

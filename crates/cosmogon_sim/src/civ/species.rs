@@ -1,5 +1,7 @@
 //! Intelligent species, derived from the world they evolved on.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use serde::{Deserialize, Serialize};
 
 use crate::astro::Body;
@@ -39,7 +41,7 @@ impl Species {
         let ocean = body.hydro.ocean_fraction;
         let aquatic_p = if ocean > 0.92 { 0.7 } else { 0.12 * ocean };
         let habitat = if rng.chance(aquatic_p) { Habitat::Water } else { Habitat::Land };
-        let mass_kg = 65.0 * g.max(0.1).powf(-0.8) * rng.normal(0.0, 0.4).exp();
+        let mass_kg = 65.0 * g.max(0.1).dpowf(-0.8) * rng.normal(0.0, 0.4).dexp();
         let lifespan_years = rng.range(35.0, 120.0);
         let sociality = rng.range(0.35, 1.0);
         let mut traits = Vec::new();

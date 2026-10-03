@@ -7,6 +7,8 @@
 //! responds plausibly to CO₂ changes, stellar brightening and water loss. It is *not* a
 //! GCM; latitude structure is added procedurally by `terrain`.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use crate::astro::{Body, BodyKind, Star, AU};
 
 /// Stellar flux relative to Earth's (S⊕).
@@ -16,7 +18,7 @@ pub fn insolation(star: &Star, t: f64, distance_m: f64) -> f64 {
 }
 
 pub fn equilibrium_temperature(luminosity: f64, distance_au: f64, albedo: f64) -> f64 {
-    278.6 * luminosity.powf(0.25) / distance_au.sqrt() * (1.0 - albedo).max(0.0).powf(0.25)
+    278.6 * luminosity.dpowf(0.25) / distance_au.sqrt() * (1.0 - albedo).max(0.0).dpowf(0.25)
 }
 
 /// Boiling point of water (K) at pressure `p_bar` (Clausius–Clapeyron).
@@ -24,7 +26,7 @@ pub fn boiling_point(p_bar: f64) -> f64 {
     if p_bar <= 0.0 {
         return 0.0;
     }
-    1.0 / (1.0 / 373.15 - (8.314 / 40_660.0) * p_bar.ln())
+    1.0 / (1.0 / 373.15 - (8.314 / 40_660.0) * p_bar.dln())
 }
 
 /// Whether liquid water is stable at temperature `t` and pressure `p_bar`.
@@ -40,11 +42,11 @@ pub fn greenhouse_tau(body: &Body, water_vapour: bool) -> f64 {
     // Thick-atmosphere power law (fit to Venus/Mars) plus the logarithmic forcing of a
     // trace gas in a pressure-broadened atmosphere (≈3 K per doubling on Earth).
     let p_co2 = a.partial(a.co2).max(0.0);
-    let co2 = 4.24 * p_co2.powf(0.777) + 0.16 * (1.0 + p_co2 / 1e-4).ln() * a.pressure_bar.min(1.0);
-    let ch4 = 2.0 * a.partial(a.ch4).max(0.0).powf(0.6);
+    let co2 = 4.24 * p_co2.dpowf(0.777) + 0.16 * (1.0 + p_co2 / 1e-4).dln() * a.pressure_bar.min(1.0);
+    let ch4 = 2.0 * a.partial(a.ch4).max(0.0).dpowf(0.6);
     let h2o = if water_vapour { 0.61 * a.pressure_bar.min(4.0).sqrt() } else { 0.0 };
     // Pressure-induced absorption in thick H₂ envelopes (super-Earths with primordial air).
-    let h2 = 0.5 * a.partial(a.h2he).max(0.0).powf(0.8);
+    let h2 = 0.5 * a.partial(a.h2he).max(0.0).dpowf(0.8);
     co2 + ch4 + h2o + h2
 }
 
@@ -67,11 +69,11 @@ pub fn update_climate(body: &mut Body, star: &Star, t: f64, stellar_distance_m: 
         let t_eq = equilibrium_temperature(lum, d_au, albedo);
         let vapour = w > 0.01 && t_eq > 200.0 && p > 0.05;
         let tau = greenhouse_tau(body, vapour);
-        temp = t_eq * (1.0 + 0.75 * tau).powf(0.25) + body.climate_bias;
+        temp = t_eq * (1.0 + 0.75 * tau).dpowf(0.25) + body.climate_bias;
         body.equilibrium_temperature = t_eq;
 
         // Water phase and surface coverage.
-        let cover = (0.71 * w.max(0.0).powf(0.3)).clamp(0.0, 1.0);
+        let cover = (0.71 * w.max(0.0).dpowf(0.3)).clamp(0.0, 1.0);
         if w < 1e-4 {
             body.hydro.ocean_fraction = 0.0;
             body.hydro.ice_fraction = 0.0;
@@ -112,9 +114,9 @@ pub fn carbon_cycle(body: &mut Body, dt_myr: f64) {
     let a = &mut body.atmosphere;
     let strength = body.geology.min(1.5);
     if body.temperature < 278.0 {
-        a.co2 = (a.co2 * 1.25f64.powf(dt_myr * strength)).min(0.6);
+        a.co2 = (a.co2 * 1.25f64.dpowf(dt_myr * strength)).min(0.6);
     } else if body.temperature > 300.0 && body.hydro.ocean_fraction > 0.0 {
-        a.co2 = (a.co2 / 1.15f64.powf(dt_myr * strength)).max(1e-5);
+        a.co2 = (a.co2 / 1.15f64.dpowf(dt_myr * strength)).max(1e-5);
     } else {
         return;
     }

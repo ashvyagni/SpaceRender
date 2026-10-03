@@ -6,6 +6,8 @@
 //! * coal and oil are buried biomass and are produced by the biosphere over time — a world
 //!   whose land life is young has little fossil fuel no matter how rich its rocks are.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use crate::astro::{Body, BodyKind, Deposit, ResourceKind, Resources};
 use crate::planet::terrain::{elevation, fibonacci_sphere, lat_lon_from_dir, ridged3_at};
 use crate::rng::Rng;
@@ -14,15 +16,15 @@ pub fn generate_resources(rng: &mut Rng, body: &Body, metallicity: f64, age_gyr:
     if !body.kind.has_surface() {
         return Resources::default();
     }
-    let metal = 10f64.powf(metallicity) * abundance;
+    let metal = 10f64.dpowf(metallicity) * abundance;
     let tect = body.geology.clamp(0.0, 3.0);
     let rocky = if body.kind == BodyKind::Rocky { 1.0 } else { 0.15 };
-    let mut ln = |sd: f64| rng.normal(0.0, sd).exp();
-    let u235 = (-(age_gyr - 4.5) / 1.015).exp().clamp(0.05, 8.0);
+    let mut ln = |sd: f64| rng.normal(0.0, sd).dexp();
+    let u235 = (-(age_gyr - 4.5) / 1.015).dexp().clamp(0.05, 8.0);
     Resources {
         iron: rocky * metal * ln(0.3),
         copper: rocky * metal * tect.sqrt() * ln(0.5),
-        tin: rocky * metal * tect.powf(0.7) * ln(0.8),
+        tin: rocky * metal * tect.dpowf(0.7) * ln(0.8),
         coal: 0.0,
         oil: 0.0,
         uranium: rocky * metal * tect.sqrt() * u235.min(3.0) * ln(0.5),

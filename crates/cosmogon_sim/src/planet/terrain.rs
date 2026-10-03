@@ -4,18 +4,20 @@
 //! the baked planet textures all call these functions, so a city drawn on the coast is on
 //! the coast the simulation reasoned about.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use crate::astro::Body;
 use crate::noise::{fbm3, ridged3};
 
 /// Unit vector from latitude/longitude (radians). +Z is the rotation pole.
 pub fn dir_from_lat_lon(lat: f64, lon: f64) -> [f64; 3] {
-    let (sl, cl) = lat.sin_cos();
-    let (so, co) = lon.sin_cos();
+    let (sl, cl) = lat.dsin_cos();
+    let (so, co) = lon.dsin_cos();
     [cl * co, cl * so, sl]
 }
 
 pub fn lat_lon_from_dir(d: [f64; 3]) -> (f64, f64) {
-    (d[2].clamp(-1.0, 1.0).asin(), d[1].atan2(d[0]))
+    (d[2].clamp(-1.0, 1.0).dasin(), d[1].datan2(d[0]))
 }
 
 /// `n` roughly uniformly spread points on the unit sphere (Fibonacci lattice).
@@ -25,7 +27,7 @@ pub fn fibonacci_sphere(n: usize) -> impl Iterator<Item = [f64; 3]> {
         let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
         let r = (1.0 - z * z).sqrt();
         let th = golden * i as f64;
-        [r * th.cos(), r * th.sin(), z]
+        [r * th.dcos(), r * th.dsin(), z]
     })
 }
 
@@ -144,7 +146,7 @@ impl SurfaceContext {
         let height = e - self.sea_level;
 
         // Latitudinal (or substellar, if locked) temperature structure.
-        let gradient = 32.0 * (1.0 - 0.6 * (self.axial_tilt.sin().abs()));
+        let gradient = 32.0 * (1.0 - 0.6 * (self.axial_tilt.dsin().abs()));
         let insolation_term = if self.tidally_locked {
             // Substellar point at lon 0: hot day side, frozen night side.
             70.0 * (d[0] - 0.25)

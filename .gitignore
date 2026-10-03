@@ -28,3 +28,6 @@ perf.data
 
 # Packaged builds
 /dist/
+
+# Raw downloaded datasets (processed outputs are committed)
+/tools/data/

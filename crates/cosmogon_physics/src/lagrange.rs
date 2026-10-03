@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use cosmogon_core::math::Vec3d;
 use cosmogon_core::constants;
 
@@ -43,13 +45,13 @@ pub fn lagrange_points(
     // L4 and L5 are at 60° from the secondary in its orbit
     let angle_60 = constants::PI / 3.0; // 60 degrees
     let l4 = Vec3d::new(
-        separation * angle_60.cos(),
-        separation * angle_60.sin(),
+        separation * angle_60.dcos(),
+        separation * angle_60.dsin(),
         0.0,
     );
     let l5 = Vec3d::new(
-        separation * angle_60.cos(),
-        -separation * angle_60.sin(),
+        separation * angle_60.dcos(),
+        -separation * angle_60.dsin(),
         0.0,
     );
 
@@ -75,7 +77,7 @@ pub fn lagrange_points(
 /// Distance of L1 from the secondary body (meters).
 pub fn l1_distance(mass_primary: f64, mass_secondary: f64, separation: f64) -> f64 {
     let mu = mass_secondary / (mass_primary + mass_secondary);
-    separation * (mu / 3.0).powf(1.0 / 3.0)
+    separation * (mu / 3.0).dpowf(1.0 / 3.0)
 }
 
 /// Approximate L2 distance from the secondary body.
@@ -110,7 +112,7 @@ pub fn l2_distance(mass_primary: f64, mass_secondary: f64, separation: f64) -> f
 /// Hill sphere radius (meters).
 pub fn hill_sphere_radius(mass_primary: f64, mass_secondary: f64, separation: f64) -> f64 {
     let mu = mass_secondary / mass_primary;
-    separation * (mu / 3.0).powf(1.0 / 3.0)
+    separation * (mu / 3.0).dpowf(1.0 / 3.0)
 }
 
 /// Check whether a point is within the Hill sphere of a secondary body.

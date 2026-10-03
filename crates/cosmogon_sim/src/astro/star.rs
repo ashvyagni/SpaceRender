@@ -5,6 +5,8 @@
 //! and an abrupt giant phase followed by a white-dwarf remnant. Good enough to make
 //! habitable zones migrate and planets die; not a stellar-evolution code.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use serde::{Deserialize, Serialize};
 
 use super::{G, SOLAR_MASS, SOLAR_RADIUS};
@@ -50,19 +52,19 @@ impl StellarPhase {
 
 pub fn luminosity_from_mass(m: f64) -> f64 {
     if m < 0.43 {
-        0.23 * m.powf(2.3)
+        0.23 * m.dpowf(2.3)
     } else if m < 2.0 {
         m.powi(4)
     } else {
-        1.4 * m.powf(3.5)
+        1.4 * m.dpowf(3.5)
     }
 }
 
 pub fn radius_from_mass(m: f64) -> f64 {
     if m < 1.0 {
-        m.powf(0.8)
+        m.dpowf(0.8)
     } else {
-        m.powf(0.57)
+        m.dpowf(0.57)
     }
 }
 
@@ -70,8 +72,8 @@ impl Star {
     pub fn from_mass(name: String, mass: f64, metallicity: f64, formed_at: f64) -> Self {
         let l = luminosity_from_mass(mass);
         let r = radius_from_mass(mass);
-        let temperature = 5772.0 * (l / (r * r)).powf(0.25);
-        let lifetime = (10.0 * mass.powf(-2.5)).min(1.0e4) * SECONDS_PER_GYR;
+        let temperature = 5772.0 * (l / (r * r)).dpowf(0.25);
+        let lifetime = (10.0 * mass.dpowf(-2.5)).min(1.0e4) * SECONDS_PER_GYR;
         let flare_activity = if mass < 0.45 { 1.0 } else if mass < 0.8 { 0.3 } else { 0.08 };
         Self {
             name,
@@ -137,7 +139,7 @@ impl Star {
             _ => {
                 let l = self.luminosity(t);
                 let r = self.current_radius(t) / SOLAR_RADIUS;
-                5772.0 * (l / (r * r)).powf(0.25)
+                5772.0 * (l / (r * r)).dpowf(0.25)
             }
         }
     }
@@ -146,7 +148,7 @@ impl Star {
     pub fn flare_activity_at(&self, t: f64) -> f64 {
         let age_gyr = self.age(t).max(0.0) / SECONDS_PER_GYR;
         let tau = if self.mass < 0.45 { 4.0 } else { 1.0 };
-        self.flare_activity * (-age_gyr / tau).exp()
+        self.flare_activity * (-age_gyr / tau).dexp()
     }
 
     /// Conservative habitable zone (AU), Kasting-style flux limits.

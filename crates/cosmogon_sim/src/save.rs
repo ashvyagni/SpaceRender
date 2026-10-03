@@ -155,3 +155,31 @@ mod tests {
         assert!(matches!(from_json(&future), Err(SaveError::TooNew(99))));
     }
 }
+
+#[cfg(test)]
+mod golden {
+    use crate::time::SECONDS_PER_KYR;
+    use crate::universe::{Scenario, UniverseSettings};
+    use crate::Universe;
+
+    /// FNV-1a over the serialised state: a compact fingerprint of an entire universe.
+    pub fn fingerprint(u: &Universe) -> u64 {
+        let json = serde_json::to_string(u).unwrap();
+        json.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+    }
+
+    /// Cross-platform determinism guard. CI runs this on macOS (ARM), Linux (x86-64) and
+    /// Windows (x86-64): the same seed must yield bit-identical universes everywhere.
+    /// If a deliberate model change alters results, update the constant (and say so in the
+    /// changelog — old saves still load, but replays of old seeds will differ).
+    #[test]
+    fn golden_universe_fingerprint() {
+        let mut u = Universe::new(UniverseSettings { seed: 2026, scenario: Scenario::Sol, system_count: 5, ..Default::default() });
+        u.advance_by(5.0 * SECONDS_PER_KYR);
+        let fp = fingerprint(&u);
+        println!("golden fingerprint: {fp:#018x}");
+        assert_eq!(fp, GOLDEN, "universe fingerprint changed: {fp:#018x}");
+    }
+
+    const GOLDEN: u64 = 0xba4a_e56d_1251_ae01;
+}

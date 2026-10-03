@@ -8,6 +8,8 @@
 //! Frame: the orbital reference plane is the XY plane with +Z as the reference pole
 //! (ecliptic-like). The renderer maps sim (x, y, z) to render (x, z, -y).
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use cosmogon_physics::kepler;
 use serde::{Deserialize, Serialize};
 
@@ -53,16 +55,16 @@ impl Orbit {
 
     fn position_from_eccentric_anomaly(&self, ecc_anomaly: f64) -> Vec3d {
         // Perifocal coordinates straight from E (avoids the true-anomaly round trip).
-        let (sin_e, cos_e) = ecc_anomaly.sin_cos();
+        let (sin_e, cos_e) = ecc_anomaly.dsin_cos();
         let px = self.a * (cos_e - self.e);
         let py = self.a * (1.0 - self.e * self.e).sqrt() * sin_e;
         self.rotate(px, py)
     }
 
     fn rotate(&self, px: f64, py: f64) -> Vec3d {
-        let (so, co) = self.node.sin_cos();
-        let (sw, cw) = self.peri.sin_cos();
-        let (si, ci) = self.i.sin_cos();
+        let (so, co) = self.node.dsin_cos();
+        let (sw, cw) = self.peri.dsin_cos();
+        let (si, ci) = self.i.dsin_cos();
         Vec3d::new(
             (co * cw - so * sw * ci) * px + (-co * sw - so * cw * ci) * py,
             (so * cw + co * sw * ci) * px + (-so * sw + co * cw * ci) * py,

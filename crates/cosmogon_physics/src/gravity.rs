@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use cosmogon_core::math::Vec3d;
 
 /// Compute the gravitational acceleration on a body at `pos_a` due to a body at `pos_b`.
@@ -28,7 +30,7 @@ pub fn gravitational_acceleration(
 ) -> Vec3d {
     let r = pos_b - pos_a;
     let r_sq = r.length_squared();
-    let denom = (r_sq + softening * softening).powf(1.5);
+    let denom = (r_sq + softening * softening).dpowf(1.5);
     if denom == 0.0 {
         Vec3d::ZERO
     } else {

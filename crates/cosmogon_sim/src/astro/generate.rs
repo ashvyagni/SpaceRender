@@ -6,6 +6,8 @@
 //! escape velocity, temperature and stellar activity. Every step is a small function so that
 //! better astrophysical models can replace it independently.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use super::*;
 use crate::names;
 use crate::planet::environment::update_climate;
@@ -21,7 +23,7 @@ const STELLAR_DENSITY_PER_LY3: f64 = 0.004;
 pub fn generate_systems(settings: &UniverseSettings) -> Vec<StarSystem> {
     let seed = settings.seed;
     let n = settings.system_count.max(1) as usize;
-    let radius_ly = (n as f64 / (4.0 / 3.0 * std::f64::consts::PI * STELLAR_DENSITY_PER_LY3)).cbrt();
+    let radius_ly = (n as f64 / (4.0 / 3.0 * std::f64::consts::PI * STELLAR_DENSITY_PER_LY3)).dcbrt();
 
     let mut systems = Vec::with_capacity(n);
     for i in 0..n {
@@ -32,10 +34,10 @@ pub fn generate_systems(settings: &UniverseSettings) -> Vec<StarSystem> {
         } else {
             // Uniform in a sphere, flattened like the galactic thin disk is locally (barely).
             let (u, v, w) = (rng.f64(), rng.f64(), rng.f64());
-            let r = radius_ly * u.cbrt() * LIGHT_YEAR;
+            let r = radius_ly * u.dcbrt() * LIGHT_YEAR;
             let th = std::f64::consts::TAU * v;
-            let ph = (2.0 * w - 1.0).acos();
-            Vec3d::new(r * ph.sin() * th.cos(), r * ph.sin() * th.sin(), 0.6 * r * ph.cos())
+            let ph = (2.0 * w - 1.0).dacos();
+            Vec3d::new(r * ph.dsin() * th.dcos(), r * ph.dsin() * th.dsin(), 0.6 * r * ph.dcos())
         };
         if home && settings.scenario == Scenario::Sol {
             let mut sol = sol::sol_system();
@@ -52,7 +54,7 @@ pub fn generate_systems(settings: &UniverseSettings) -> Vec<StarSystem> {
 fn sample_imf(rng: &mut Rng) -> f64 {
     let pl = |rng: &mut Rng, lo: f64, hi: f64, alpha: f64| {
         let k = 1.0 - alpha;
-        (lo.powf(k) + rng.f64() * (hi.powf(k) - lo.powf(k))).powf(1.0 / k)
+        (lo.dpowf(k) + rng.f64() * (hi.dpowf(k) - lo.dpowf(k))).dpowf(1.0 / k)
     };
     let u = rng.f64();
     if u < 0.73 {
@@ -72,7 +74,7 @@ pub fn generate_system(settings: &UniverseSettings, id: u32, position: Vec3d, ga
 
     let mass = if garden { rng.range(0.85, 1.1) } else { sample_imf(&mut rng) };
     let metallicity = rng.normal(-0.05, 0.2).clamp(-1.0, 0.5);
-    let lifetime_gyr = (10.0 * mass.powf(-2.5)).min(1.0e4);
+    let lifetime_gyr = (10.0 * mass.dpowf(-2.5)).min(1.0e4);
     let age_gyr = if garden { rng.range(3.5, 5.5) } else { rng.range(0.3, lifetime_gyr.min(12.0) * 0.98) };
     let star = Star::from_mass(name.clone(), mass, metallicity, -age_gyr * SECONDS_PER_GYR);
 
@@ -103,18 +105,18 @@ pub fn generate_system(settings: &UniverseSettings, id: u32, position: Vec3d, ga
 fn rocky_radius(mass_e: f64) -> f64 {
     // Chen & Kipping (2017) terran branch, then a flatter volatile-rich branch.
     if mass_e < 2.0 {
-        mass_e.powf(0.279)
+        mass_e.dpowf(0.279)
     } else {
-        1.21 * (mass_e / 2.0).powf(0.45)
+        1.21 * (mass_e / 2.0).dpowf(0.45)
     }
 }
 
 fn giant_radius(mass_e: f64, ice: bool) -> f64 {
     if ice {
-        0.8 * mass_e.powf(0.589)
+        0.8 * mass_e.dpowf(0.589)
     } else {
         // Degenerate interiors: radius nearly flat with mass.
-        11.2 * (mass_e / 318.0).powf(-0.04)
+        11.2 * (mass_e / 318.0).dpowf(-0.04)
     }
 }
 
@@ -126,7 +128,7 @@ fn generate_planets(settings: &UniverseSettings, sys: &mut StarSystem, outer_lim
     let m = sys.star.mass;
     let frost = sys.star.frost_line_au();
     let feh = sys.star.metallicity;
-    let p_giant = if m < 0.5 { 0.04 } else { 0.12 } * 10f64.powf(2.0 * feh) * m.min(2.0);
+    let p_giant = if m < 0.5 { 0.04 } else { 0.12 } * 10f64.dpowf(2.0 * feh) * m.min(2.0);
 
     let expected = 1.5 + 4.5 * m.min(1.3);
     let count = rng.poisson(expected).clamp(if garden { 3 } else { 0 }, 11) as usize;
@@ -160,7 +162,7 @@ fn generate_planets(settings: &UniverseSettings, sys: &mut StarSystem, outer_lim
         let idx = planets
             .iter()
             .enumerate()
-            .min_by(|a, b| (a.1 .0 / hz_mid).ln().abs().total_cmp(&(b.1 .0 / hz_mid).ln().abs()))
+            .min_by(|a, b| (a.1 .0 / hz_mid).dln().abs().total_cmp(&(b.1 .0 / hz_mid).dln().abs()))
             .map(|(i, _)| i)
             .unwrap_or(0);
         if planets.is_empty() {
@@ -172,7 +174,7 @@ fn generate_planets(settings: &UniverseSettings, sys: &mut StarSystem, outer_lim
 
     let star_age_gyr = age_gyr;
     for (n, &(a, kind, mass_e)) in planets.iter().enumerate() {
-        let is_garden_world = garden && kind == BodyKind::Rocky && (a / sys.star.luminosity(0.0).sqrt()).ln().abs() < 0.05;
+        let is_garden_world = garden && kind == BodyKind::Rocky && (a / sys.star.luminosity(0.0).sqrt()).dln().abs() < 0.05;
         let name = format!("{} {}", sys.name, names::planet_letter(n));
         let body = make_body(settings, sys, sys.bodies.len() as u32, name, None, a * AU, kind, mass_e, &mut rng, star_age_gyr, is_garden_world);
         sys.bodies.push(body);
@@ -183,7 +185,7 @@ fn generate_planets(settings: &UniverseSettings, sys: &mut StarSystem, outer_lim
     for p in 0..planet_count {
         let mut mrng = Rng::stream(seed, domain::MOONS, &[sid, p as u64]);
         let parent = sys.bodies[p].clone();
-        let hill = parent.orbit.a * (parent.mass / (3.0 * sys.star.mass * SOLAR_MASS)).cbrt();
+        let hill = parent.orbit.a * (parent.mass / (3.0 * sys.star.mass * SOLAR_MASS)).dcbrt();
         let n_moons = match parent.kind {
             BodyKind::GasGiant => mrng.poisson(3.5).min(7),
             BodyKind::IceGiant => mrng.poisson(2.0).min(5),
@@ -286,7 +288,7 @@ fn make_body(
         None => star.mu(),
     };
     // Tidal locking: close-in planets (scale ~0.5 AU·M^⅓ at Gyr ages) and nearly all moons.
-    let lock_radius_au = 0.45 * star.mass.cbrt() * (age_gyr / 4.5).max(0.05).powf(1.0 / 6.0);
+    let lock_radius_au = 0.45 * star.mass.dcbrt() * (age_gyr / 4.5).max(0.05).dpowf(1.0 / 6.0);
     let tidally_locked = parent.is_some() || (stellar_a_au < lock_radius_au && kind.has_surface());
     let rotation_period = if tidally_locked {
         orbit.period(mu_parent)
@@ -310,7 +312,7 @@ fn make_body(
 
     // Geology: radiogenic heat ~ mass, decaying with age; Earth (1 M⊕, 4.5 Gyr) ≈ 1.
     let geology = if kind.has_surface() {
-        (1.76 * mass_e.sqrt() * (-age_gyr / (8.0 * mass_e.sqrt().max(0.05))).exp()).min(3.0)
+        (1.76 * mass_e.sqrt() * (-age_gyr / (8.0 * mass_e.sqrt().max(0.05))).dexp()).min(3.0)
     } else {
         0.0
     };
@@ -356,7 +358,7 @@ fn make_body(
                 // Super-Earth that kept part of its primordial hydrogen envelope.
                 Atmosphere { pressure_bar: rng.log_uniform(20.0, 500.0), h2he: 0.9, h2o: 0.05, ch4: 0.05, ..Default::default() }
             } else {
-                let p = (rng.normal(0.0, 1.1).exp() * mass_e.powf(1.3) * keep.min(2.0)).clamp(0.003, 150.0);
+                let p = (rng.normal(0.0, 1.1).dexp() * mass_e.dpowf(1.3) * keep.min(2.0)).clamp(0.003, 150.0);
                 let hot = t_eq_guess > 300.0 && water_inventory > 0.01;
                 if hot {
                     Atmosphere { pressure_bar: p.max(30.0), co2: 0.96, n2: 0.035, h2o: 0.005, ..Default::default() }

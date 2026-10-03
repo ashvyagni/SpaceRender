@@ -6,6 +6,8 @@
 //! back. Oxygen, fertile land, coal and oil are *outputs* of the biosphere's history and
 //! feed directly into what civilizations can later do.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use serde::{Deserialize, Serialize};
 
 use crate::astro::Body;
@@ -196,7 +198,7 @@ impl Biosphere {
                 if (t - since) / SECONDS_PER_MYR > p.life.oxygen_sink_delay_myr && body.atmosphere.is_present() {
                     let land = if self.stage >= Stage::ComplexEcosystems { 1.0 } else { 0.55 };
                     let target = 0.21 * self.biomass.max(0.3) * land;
-                    let k = 1.0 - (-STEP_YEARS / 1e6 / p.life.oxygenation_timescale_myr).exp();
+                    let k = 1.0 - (-STEP_YEARS / 1e6 / p.life.oxygenation_timescale_myr).dexp();
                     let before = body.atmosphere.o2;
                     let o2 = before + (target - before) * k;
                     let a = &mut body.atmosphere;

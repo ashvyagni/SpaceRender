@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use cosmogon_core::math::Vec3d;
 use cosmogon_core::constants;
 
@@ -18,8 +20,8 @@ pub fn solve_kepler(mean_anomaly: f64, eccentricity: f64, tolerance: f64, max_it
     let mut e = mean_anomaly;
 
     for _ in 0..max_iter {
-        let delta = e - eccentricity * e.sin() - mean_anomaly;
-        let derivative = 1.0 - eccentricity * e.cos();
+        let delta = e - eccentricity * e.dsin() - mean_anomaly;
+        let derivative = 1.0 - eccentricity * e.dcos();
         if derivative.abs() < f64::EPSILON {
             break;
         }
@@ -54,7 +56,7 @@ pub fn eccentric_to_true_anomaly(eccentric_anomaly: f64, eccentricity: f64) -> f
     let e = eccentricity;
     let half_e = eccentric_anomaly * 0.5;
     let factor = ((1.0 + e) / (1.0 - e)).sqrt();
-    let mut nu = 2.0 * (factor * half_e.tan()).atan();
+    let mut nu = 2.0 * (factor * half_e.dtan()).datan();
 
     // Ensure positive
     if nu < 0.0 {
@@ -79,7 +81,7 @@ pub fn eccentric_to_true_anomaly(eccentric_anomaly: f64, eccentricity: f64) -> f
 pub fn orbital_radius(semi_major_axis: f64, eccentricity: f64, true_anomaly: f64) -> f64 {
     let e = eccentricity;
     let p = semi_major_axis * (1.0 - e * e); // semi-latus rectum
-    p / (1.0 + e * true_anomaly.cos())
+    p / (1.0 + e * true_anomaly.dcos())
 }
 
 /// Convert classical orbital elements to Cartesian state vectors (position and velocity).
@@ -118,23 +120,23 @@ pub fn orbital_state_vectors(
     let r = orbital_radius(semi_major_axis, eccentricity, nu);
 
     // 4. Position in orbital plane (perifocal frame)
-    let r_peri = Vec3d::new(r * nu.cos(), r * nu.sin(), 0.0);
+    let r_peri = Vec3d::new(r * nu.dcos(), r * nu.dsin(), 0.0);
 
     // 5. Velocity in orbital plane
     let h = (gravitational_param * semi_major_axis * (1.0 - eccentricity * eccentricity)).sqrt();
     let v_peri = Vec3d::new(
-        -gravitational_param / h * nu.sin(),
-        gravitational_param / h * (eccentricity + nu.cos()),
+        -gravitational_param / h * nu.dsin(),
+        gravitational_param / h * (eccentricity + nu.dcos()),
         0.0,
     );
 
     // 6. Rotation by argument of perihelion (ω), inclination (i), and Ω
-    let cos_omega = argument_perihelion.cos();
-    let sin_omega = argument_perihelion.sin();
-    let cos_i = inclination.cos();
-    let sin_i = inclination.sin();
-    let cos_node = longitude_ascending.cos();
-    let sin_node = longitude_ascending.sin();
+    let cos_omega = argument_perihelion.dcos();
+    let sin_omega = argument_perihelion.dsin();
+    let cos_i = inclination.dcos();
+    let sin_i = inclination.dsin();
+    let cos_node = longitude_ascending.dcos();
+    let sin_node = longitude_ascending.dsin();
 
     // Combined rotation matrix elements (perifocal → inertial)
     let p_x = cos_node * cos_omega - sin_node * sin_omega * cos_i;
@@ -232,7 +234,7 @@ mod tests {
         let m = 0.7;
         let ecc = 0.1;
         let e = solve_kepler(m, ecc, 1e-12, 50);
-        let residual = e - ecc * e.sin() - m;
+        let residual = e - ecc * e.dsin() - m;
         assert!(residual.abs() < 1e-10);
     }
 

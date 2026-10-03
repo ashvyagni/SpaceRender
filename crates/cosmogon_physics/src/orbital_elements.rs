@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
 use cosmogon_core::math::Vec3d;
 use cosmogon_core::constants;
 
@@ -73,11 +75,11 @@ pub fn state_vectors_to_elements(r: Vec3d, v: Vec3d, mu: f64) -> OrbitalElements
     };
 
     // Inclination
-    let inclination = (h.z / h_mag).clamp(-1.0, 1.0).acos();
+    let inclination = (h.z / h_mag).clamp(-1.0, 1.0).dacos();
 
     // Longitude of ascending node
     let longitude_ascending = if n_mag > 1e-15 {
-        let mut raan = n.x.atan2(n.y);
+        let mut raan = n.x.datan2(n.y);
         if raan < 0.0 {
             raan += constants::TWO_PI;
         }
@@ -89,7 +91,7 @@ pub fn state_vectors_to_elements(r: Vec3d, v: Vec3d, mu: f64) -> OrbitalElements
     // Argument of perihelion
     let argument_perihelion = if n_mag > 1e-15 && eccentricity > 1e-15 {
         let aop = n.dot(e_vec) / (n_mag * eccentricity);
-        let aop = aop.clamp(-1.0, 1.0).acos();
+        let aop = aop.clamp(-1.0, 1.0).dacos();
         if e_vec.z < 0.0 {
             constants::TWO_PI - aop
         } else {
@@ -102,7 +104,7 @@ pub fn state_vectors_to_elements(r: Vec3d, v: Vec3d, mu: f64) -> OrbitalElements
     // True anomaly
     let true_anomaly = if eccentricity > 1e-15 {
         let ta = e_vec.dot(r) / (eccentricity * r_mag);
-        let ta = ta.clamp(-1.0, 1.0).acos();
+        let ta = ta.clamp(-1.0, 1.0).dacos();
         if r.dot(v) < 0.0 {
             constants::TWO_PI - ta
         } else {
@@ -113,7 +115,7 @@ pub fn state_vectors_to_elements(r: Vec3d, v: Vec3d, mu: f64) -> OrbitalElements
         if n_mag > 1e-15 {
             let cos_ta = n.dot(r) / (n_mag * r_mag);
             let sin_ta = h.dot(n.cross(r)) / (h_mag * n_mag * r_mag);
-            let mut ta = cos_ta.clamp(-1.0, 1.0).acos();
+            let mut ta = cos_ta.clamp(-1.0, 1.0).dacos();
             if sin_ta < 0.0 {
                 ta = constants::TWO_PI - ta;
             }
@@ -151,26 +153,26 @@ pub fn elements_to_state_vectors(elements: OrbitalElements, mu: f64) -> (Vec3d, 
 
     // Orbital radius
     let p = a * (1.0 - e * e); // semi-latus rectum
-    let r = p / (1.0 + e * nu.cos());
+    let r = p / (1.0 + e * nu.dcos());
 
     // Position in perifocal frame
-    let r_peri = Vec3d::new(r * nu.cos(), r * nu.sin(), 0.0);
+    let r_peri = Vec3d::new(r * nu.dcos(), r * nu.dsin(), 0.0);
 
     // Velocity in perifocal frame
     let h = (mu * p).sqrt();
     let v_peri = Vec3d::new(
-        -mu / h * nu.sin(),
-        mu / h * (e + nu.cos()),
+        -mu / h * nu.dsin(),
+        mu / h * (e + nu.dcos()),
         0.0,
     );
 
     // Rotation matrix elements
-    let cos_w = w.cos();
-    let sin_w = w.sin();
-    let cos_i = i.cos();
-    let sin_i = i.sin();
-    let cos_o = omega.cos();
-    let sin_o = omega.sin();
+    let cos_w = w.dcos();
+    let sin_w = w.dsin();
+    let cos_i = i.dcos();
+    let sin_i = i.dsin();
+    let cos_o = omega.dcos();
+    let sin_o = omega.dsin();
 
     // Perifocal → inertial transformation
     let position = Vec3d::new(
