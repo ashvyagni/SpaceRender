@@ -366,7 +366,7 @@ domain = "Energy"
 years = 300
 requires = ["tech:iron_working", "tech:scientific_method", "k:Physics>=840000", "k:Engineering>=1120000"]
 demand = "energy"
-effects = { energy = 1500, research = 1.3, capacity = 1.3, urban = 0.12, fossil = 0.6 }
+effects = { energy = 1500, research = 1.6, capacity = 1.3, urban = 0.12, fossil = 0.6 }
 description = "Heat into work. The start of an energy revolution."
 [[tech.route]]
 label = "coal-fired"
@@ -383,8 +383,8 @@ era = "Industrial"
 domain = "Engineering"
 years = 150
 requires = ["tech:steam_power", "k:Engineering>=1680000", "pop>=30000000"]
-effects = { capacity = 1.3, urban = 0.18, growth = 0.004, research = 1.3 }
-description = "Factories, mass production and the move to the cities."
+effects = { capacity = 1.3, urban = 0.18, growth = 0.004, research = 2.2 }
+description = "Factories, mass production, mass schooling and the move to the cities."
 
 [[tech]]
 id = "railways"

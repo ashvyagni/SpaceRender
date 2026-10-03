@@ -59,6 +59,9 @@ pub struct Site {
     pub near_deposit: Option<ResourceKind>,
     pub founded: Option<f64>,
     pub population: f64,
+    /// Owning polity (index into the civilization's polities).
+    #[serde(default)]
+    pub polity: Option<u16>,
 }
 
 impl Site {
@@ -140,7 +143,7 @@ pub fn candidate_sites(body: &Body, surface: &SurfaceContext, habitat: Habitat, 
             }
         };
         if score > 0.08 {
-            out.push(Site { name: String::new(), lat, lon, score: score * rng.range(0.85, 1.15), coastal: neighbours_wet, near_deposit: deposit, founded: None, population: 0.0 });
+            out.push(Site { name: String::new(), lat, lon, score: score * rng.range(0.85, 1.15), coastal: neighbours_wet, near_deposit: deposit, founded: None, population: 0.0, polity: None });
         }
     }
     out.sort_by(|a, b| b.score.total_cmp(&a.score));

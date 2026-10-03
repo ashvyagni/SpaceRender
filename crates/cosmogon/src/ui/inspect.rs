@@ -410,6 +410,33 @@ fn civilization(ui: &mut egui::Ui, u: &Universe, c: &Civilization, ui_state: &mu
         }
     });
 
+    let mut nations: Vec<_> = c.polities.iter().filter(|p| p.alive()).collect();
+    if !nations.is_empty() {
+        nations.sort_by(|a, b| b.population.total_cmp(&a.population));
+        heading(ui, &format!("Nations ({})", nations.len()));
+        for p in nations.iter().take(12) {
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 5.0, egui::Color32::from_rgb(p.color[0], p.color[1], p.color[2]));
+                ui.label(egui::RichText::new(p.title()).strong());
+            });
+            let capital = &c.sites[p.capital as usize].name;
+            let mut line = format!("   {} people · {} settlements · capital {}", compact(p.population), p.sites, capital);
+            if !p.at_war.is_empty() {
+                let foes: Vec<String> = p.at_war.iter().filter_map(|f| c.polities.get(*f as usize)).map(|f| f.title()).collect();
+                line.push_str(&format!(" · at war with {}", foes.join(", ")));
+            }
+            ui.label(egui::RichText::new(line).size(11.0).color(if p.at_war.is_empty() { MUTED } else { DANGER }));
+        }
+        if nations.len() > 12 {
+            ui.label(egui::RichText::new(format!("…and {} smaller states", nations.len() - 12)).size(11.0).color(MUTED));
+        }
+        let fallen = c.polities.len() - nations.len();
+        if fallen > 0 {
+            ui.label(egui::RichText::new(format!("{fallen} states have risen and fallen.")).size(11.0).color(MUTED));
+        }
+    }
+
     heading(ui, "Species");
     ui.label(format!("The {} — {:.0} kg, live ~{:.0} years", c.species.name, c.species.mass_kg, c.species.lifespan_years));
     for t in &c.species.traits {

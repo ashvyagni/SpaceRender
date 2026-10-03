@@ -8,6 +8,7 @@
 #[allow(unused_imports)]
 use cosmogon_core::dmath::DMath;
 pub mod knowledge;
+pub mod polity;
 pub mod settlements;
 pub mod species;
 pub mod tech;
@@ -163,6 +164,9 @@ pub struct Civilization {
 
     pub sites: Vec<Site>,
     pub links: Vec<Link>,
+    /// Rival states sharing this civilization's world.
+    #[serde(default)]
+    pub polities: Vec<polity::Polity>,
     pub highest_tier: Option<Tier>,
 
     pub radio_since: Option<f64>,
@@ -300,6 +304,7 @@ impl Civilization {
             baseline_temperature: body.temperature,
             sites,
             links: Vec::new(),
+            polities: Vec::new(),
             highest_tier: None,
             radio_since: None,
             satellites: 0,
@@ -566,7 +571,10 @@ impl Civilization {
             ev.push(CivEvent { importance: if frac > 0.1 { 4 } else { 3 }, category: C::Disaster, title: "Pandemic".into(), detail: format!("{:.0}% of the population ({}) dies", frac * 100.0, group_digits(dead)) });
         }
         let organised = self.sites.iter().filter(|s| s.active()).count() > 8;
-        if organised && rng.chance(over(cp.war_rate * (1.4 - self.stability).max(0.1) * (1.0 + self.pressures.food), dt)) {
+        let rival_states = self.polities.iter().filter(|p| p.alive()).count() > 1;
+        // Between rival states, wars are fought by polities (see below); a lone state still
+        // suffers revolts and civil strife.
+        if organised && !rival_states && rng.chance(over(cp.war_rate * (1.4 - self.stability).max(0.1) * (1.0 + self.pressures.food), dt)) {
             let nuclear = self.flags.contains("nuclear_weapons") && self.stability < 0.35 && rng.chance(0.05);
             let frac = if nuclear { rng.range(0.3, 0.8) } else { rng.range(0.002, 0.06) };
             self.population -= self.population * frac;
@@ -610,6 +618,7 @@ impl Civilization {
         self.urbanisation += (self.urban_target - self.urbanisation) * relax(0.01, dt);
         self.settlement_timer += dt;
         if self.settlement_timer >= 10.0 {
+            let elapsed = self.settlement_timer;
             self.settlement_timer = 0.0;
             let p = settlements::SpreadParams {
                 reach: self.reach,
@@ -623,7 +632,39 @@ impl Civilization {
             if self.adjacency.is_empty() {
                 self.adjacency = settlements::Adjacency::build(&self.sites, &world.surface, self.species.habitat);
             }
-            for (site, tier) in settlements::update(&mut self.sites, &mut self.links, &self.adjacency, self.population, &p, t) {
+            let knows_agriculture = self.knows("agriculture");
+            let promotions = settlements::update(&mut self.sites, &mut self.links, &self.adjacency, self.population, &p, t);
+            let politics = polity::update(
+                &mut self.sites,
+                &mut self.polities,
+                &self.adjacency,
+                &polity::PoliticsInput {
+                    flags: &self.flags,
+                    stability: self.stability,
+                    food_pressure: self.pressures.food,
+                    reach: self.reach,
+                    seafaring: p.seafaring,
+                    knows_agriculture,
+                },
+                elapsed,
+                t,
+                rng,
+            );
+            if politics.war_deaths > 0.0 {
+                let frac = politics.war_deaths.min(0.5);
+                self.population *= 1.0 - frac;
+                self.pressures.war = self.pressures.war.max((frac / 0.06).min(1.0));
+                self.stability -= 0.02 * politics.active_wars.min(5) as f64;
+                let nuclear = self.flags.contains("nuclear_weapons") && self.stability < 0.3 && rng.chance(over(0.004 * politics.active_wars as f64, elapsed));
+                if nuclear {
+                    let f = rng.range(0.3, 0.8);
+                    self.population *= 1.0 - f;
+                    self.stability -= 0.5;
+                    ev.push(CivEvent { importance: 5, category: C::War, title: "Nuclear war".into(), detail: format!("Rival states exchange nuclear weapons; {:.0}% of the population is killed.", f * 100.0) });
+                }
+            }
+            ev.extend(politics.events);
+            for (site, tier) in promotions {
                 if self.highest_tier.is_none_or(|h| tier > h) && tier >= Tier::Village {
                     self.highest_tier = Some(tier);
                     let name = &self.sites[site].name;

@@ -40,7 +40,7 @@ flare_extinction_factor = 4.0
 base_growth_rate = 0.0004
 # Research produced per year scales with population^research_exponent.
 research_exponent = 0.75
-research_scale = 0.0001
+research_scale = 0.00007
 # Without writing, accumulated knowledge erodes towards a cap (fraction lost per year;
 # 0.002 is a ~350-year half-life for what isn't actively taught).
 oral_knowledge_decay = 0.002

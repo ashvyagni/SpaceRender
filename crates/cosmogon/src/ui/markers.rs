@@ -202,9 +202,18 @@ pub fn draw_markers(
                 Tier::Metropolis => 4.2,
                 Tier::Megacity => 5.2,
             };
-            painter.circle_filled(sp, size, egui::Color32::from_rgba_unmultiplied(255, 205, 120, (220.0 * alpha) as u8));
-            if labels && rank < 12 && tier >= Tier::Town && px > 140.0 {
-                label(&painter, sp, &format!("{} · {}", s.name, super::compact(s.population)), egui::Color32::from_rgba_unmultiplied(255, 225, 170, (255.0 * alpha) as u8), &small);
+            // Settlements take their nation's colour; capitals get a ring.
+            let (r, g, b) = match s.polity.and_then(|p| c.polities.get(p as usize)) {
+                Some(p) => (p.color[0], p.color[1], p.color[2]),
+                None => (255, 205, 120),
+            };
+            painter.circle_filled(sp, size, egui::Color32::from_rgba_unmultiplied(r, g, b, (230.0 * alpha) as u8));
+            let is_capital = s.polity.and_then(|p| c.polities.get(p as usize)).is_some_and(|p| p.alive() && std::ptr::eq(&c.sites[p.capital as usize], *s));
+            if is_capital {
+                painter.circle_stroke(sp, size + 3.0, egui::Stroke::new(1.5_f32, egui::Color32::from_rgba_unmultiplied(255, 255, 255, (200.0 * alpha) as u8)));
+            }
+            if labels && (rank < 12 || is_capital) && tier >= Tier::Town && px > 140.0 {
+                label(&painter, sp, &format!("{}{} · {}", if is_capital { "★ " } else { "" }, s.name, super::compact(s.population)), egui::Color32::from_rgba_unmultiplied(255, 225, 170, (255.0 * alpha) as u8), &small);
             }
         }
         // Satellites: representative dots on low orbits (visual exaggeration of altitude).

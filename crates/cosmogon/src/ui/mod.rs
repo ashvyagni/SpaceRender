@@ -20,7 +20,7 @@ pub const MUTED: egui::Color32 = egui::Color32::from_rgb(130, 140, 160);
 pub const LIFE: egui::Color32 = egui::Color32::from_rgb(110, 210, 140);
 pub const CIV: egui::Color32 = egui::Color32::from_rgb(255, 196, 92);
 pub const DANGER: egui::Color32 = egui::Color32::from_rgb(235, 100, 90);
-pub const PANEL: egui::Color32 = egui::Color32::from_rgba_premultiplied(9, 12, 20, 232);
+pub const PANEL: egui::Color32 = egui::Color32::from_rgb(9, 12, 20);
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeftTab {
