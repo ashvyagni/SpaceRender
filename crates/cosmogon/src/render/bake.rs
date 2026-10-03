@@ -9,6 +9,8 @@ use cosmogon_sim::astro::{Body, BodyKind};
 use cosmogon_sim::civ::settlements::LinkKind;
 use cosmogon_sim::civ::Civilization;
 use cosmogon_sim::noise::{fbm3, ridged3};
+
+use super::look::{Look, Style};
 use cosmogon_sim::planet::terrain::{dir_from_lat_lon, Biome, SurfaceContext};
 
 pub struct BakedSurface {
@@ -18,6 +20,8 @@ pub struct BakedSurface {
     pub albedo: Vec<u8>,
     /// R8 cloud opacity.
     pub clouds: Vec<u8>,
+    /// R8 self-emission (lava, hot spots, thermal glow).
+    pub emission: Vec<u8>,
 }
 
 fn srgb(c: [f32; 3]) -> [u8; 3] {
@@ -81,43 +85,29 @@ pub fn bake_surface(body: &Body, vegetated: bool, width: u32) -> BakedSurface {
     let height = width / 2;
     let seed = body.terrain_seed;
     let ctx = SurfaceContext::new(body, vegetated);
-    let base = body.color;
-    let thick_haze = body.atmosphere.pressure_bar > 20.0 && body.kind.has_surface();
-    let titan_haze = body.atmosphere.ch4 > 0.02 && body.kind.has_surface() && body.atmosphere.pressure_bar > 0.5;
+    let look = Look::of(body);
 
-    let albedo = par_rows(width, height, 4, |y, row| {
+    // RGBA (alpha = water mask) plus one emission byte per texel, split afterwards.
+    let packed = par_rows(width, height, 5, |y, row| {
         for x in 0..width {
             let d = texel_dir(x, y, width, height);
-            let (rgb, water): ([f32; 3], bool) = match body.kind {
-                BodyKind::GasGiant | BodyKind::IceGiant => {
-                    let ice = body.kind == BodyKind::IceGiant;
-                    let turb = fbm3(seed, [d[0] * 3.0, d[1] * 3.0, d[2] * 3.0], 5, 2.0, 0.55);
-                    let lat = d[2] + 0.08 * turb;
-                    let bands = if ice { 4.0 } else { 11.0 };
-                    let b = ((lat * bands * std::f64::consts::PI).sin() * 0.5 + 0.5) as f32;
-                    let fine = fbm3(seed ^ 9, [d[0] * 12.0, d[1] * 12.0, d[2] * 40.0], 4, 2.0, 0.5) as f32;
-                    let light = mix3(base, [1.0, 0.97, 0.9], 0.45);
-                    let dark = [base[0] * 0.65, base[1] * 0.58, base[2] * 0.52];
-                    let k = if ice { 0.25 } else { 1.0 };
-                    let c = mix3(base, if b > 0.5 { light } else { dark }, ((b - 0.5).abs() * 2.0) * k + fine * 0.15);
-                    (c, false)
-                }
-                _ if thick_haze || titan_haze => {
-                    let n = fbm3(seed, [d[0] * 2.0, d[1] * 2.0, d[2] * 6.0], 5, 2.0, 0.5) as f32;
-                    let deck = if titan_haze { [0.78, 0.58, 0.28] } else { [0.93, 0.85, 0.62] };
-                    (mix3(deck, [deck[0] * 0.85, deck[1] * 0.8, deck[2] * 0.7], 0.5 + n), false)
-                }
-                _ => surface_color(body.kind, &ctx, base, seed, d),
-            };
-            let px = srgb(rgb);
-            let i = x as usize * 4;
+            let t = look.globe(body, &ctx, d);
+            let px = srgb(t.rgb);
+            let i = x as usize * 5;
             row[i..i + 3].copy_from_slice(&px);
-            row[i + 3] = if water { 255 } else { 0 };
+            row[i + 3] = if t.water { 255 } else { 0 };
+            row[i + 4] = (t.emit.clamp(0.0, 1.0) * 255.0) as u8;
         }
     });
+    let mut albedo = Vec::with_capacity((width * height * 4) as usize);
+    let mut emission = Vec::with_capacity((width * height) as usize);
+    for p in packed.chunks_exact(5) {
+        albedo.extend_from_slice(&p[..4]);
+        emission.push(p[4]);
+    }
 
-    // Cloud cover scales with surface water and atmosphere.
-    let coverage = if body.kind.has_surface() && body.atmosphere.pressure_bar > 0.05 && body.hydro.ocean_fraction > 0.0 && !thick_haze {
+    // Weather clouds where there is open water and an atmosphere to carry it.
+    let coverage = if matches!(look.style, Style::Terran) && body.kind.has_surface() && body.atmosphere.pressure_bar > 0.05 && body.hydro.ocean_fraction > 0.0 {
         (0.25 + 0.45 * body.hydro.ocean_fraction) as f32
     } else {
         0.0
@@ -138,7 +128,7 @@ pub fn bake_surface(body: &Body, vegetated: bool, width: u32) -> BakedSurface {
         vec![0u8; (width * height) as usize]
     };
 
-    BakedSurface { width, height, albedo, clouds }
+    BakedSurface { width, height, albedo, clouds, emission }
 }
 
 
@@ -194,10 +184,12 @@ pub fn surface_color(kind: BodyKind, ctx: &SurfaceContext, base: [f32; 3], seed:
 }
 
 /// Night-side lights from a civilization's settlements and transport links (R8).
-pub fn bake_lights(civ: &Civilization, width: u32) -> Vec<u8> {
+/// Lights of an optional native civilization plus outposts `(lat, lon, population)` such as
+/// colonies of another world's civilization (domes and habitats glow on the night side).
+pub fn bake_lights_with(civ: Option<&Civilization>, outposts: &[(f64, f64, f64)], width: u32) -> Vec<u8> {
     let height = width / 2;
     let mut buf = vec![0f32; (width * height) as usize];
-    let electric = civ.flags.contains("electric_light");
+    let electric = civ.is_none_or(|c| c.flags.contains("electric_light"));
     let scale = if electric { 1.0 } else { 0.12 };
     let mut splat = |lat: f64, lon: f64, radius_px: f32, intensity: f32| {
         let cx = (lon.rem_euclid(std::f64::consts::TAU) / std::f64::consts::TAU * width as f64) as f32;
@@ -220,6 +212,17 @@ pub fn bake_lights(civ: &Civilization, width: u32) -> Vec<u8> {
                 }
             }
         }
+    };
+    for &(lat, lon, pop) in outposts {
+        let core = ((pop.max(10.0).log10() as f32 - 1.0) / 5.0).clamp(0.2, 1.2);
+        splat(lat, lon, 1.5 + (pop.max(1.0).log10() as f32 - 3.0).max(0.0), core);
+        for k in 0..6 {
+            let a = k as f64 * 1.047;
+            splat(lat + 0.004 * a.sin(), lon + 0.004 * a.cos(), 0.9, core * 0.5);
+        }
+    }
+    let Some(civ) = civ else {
+        return buf.into_iter().map(|v| (v.min(1.0) * 255.0) as u8).collect();
     };
     let px_per_rad = width as f32 / std::f32::consts::TAU;
     for (si, s) in civ.sites.iter().enumerate().filter(|(_, s)| s.active() && s.population > 50.0) {
@@ -257,22 +260,6 @@ pub fn bake_lights(civ: &Civilization, width: u32) -> Vec<u8> {
         }
     }
     buf.into_iter().map(|v| (v.min(1.0) * 255.0) as u8).collect()
-}
-
-/// Radial ring texture (RGBA, 256×1, alpha = opacity).
-pub fn bake_rings(seed: u64, opacity: f64, tint: [f32; 3]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(256 * 4);
-    for i in 0..256 {
-        let r = i as f64 / 255.0;
-        let bands = fbm3(seed, [r * 40.0, 0.5, 0.5], 4, 2.2, 0.6) * 0.5 + 0.5;
-        let gap = if (0.62..0.67).contains(&r) { 0.1 } else { 1.0 };
-        let edge = (r * 12.0).min(1.0) * ((1.0 - r) * 20.0).min(1.0);
-        let a = (bands * gap * edge * opacity).clamp(0.0, 1.0);
-        let c = mix3(tint, [0.95, 0.92, 0.85], bands as f32);
-        out.extend_from_slice(&srgb(c));
-        out.push((a * 255.0) as u8);
-    }
-    out
 }
 
 #[cfg(test)]

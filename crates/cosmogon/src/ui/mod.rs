@@ -69,6 +69,7 @@ pub struct UiState {
     pub intro_started: Option<f64>,
     pub intro_skipped: bool,
     pub tech_filter_blocked: bool,
+    pub share_domain: u8,
     /// Sandbox tool windows.
     pub create_open: bool,
     pub create: tools::CreateForm,
@@ -105,6 +106,7 @@ impl Default for UiState {
             intro_started: None,
             intro_skipped: false,
             tech_filter_blocked: false,
+            share_domain: 0,
             create_open: false,
             create: tools::CreateForm::default(),
             physics_open: false,

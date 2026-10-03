@@ -62,6 +62,10 @@ pub struct Site {
     /// Owning polity (index into the civilization's polities).
     #[serde(default)]
     pub polity: Option<u16>,
+    /// Measured share of the civilization's urban population (real cities); such sites
+    /// keep their share instead of following the rank-size rule.
+    #[serde(default)]
+    pub share: Option<f64>,
 }
 
 impl Site {
@@ -143,7 +147,7 @@ pub fn candidate_sites(body: &Body, surface: &SurfaceContext, habitat: Habitat, 
             }
         };
         if score > 0.08 {
-            out.push(Site { name: String::new(), lat, lon, score: score * rng.range(0.85, 1.15), coastal: neighbours_wet, near_deposit: deposit, founded: None, population: 0.0, polity: None });
+            out.push(Site { name: String::new(), lat, lon, score: score * rng.range(0.85, 1.15), coastal: neighbours_wet, near_deposit: deposit, founded: None, population: 0.0, polity: None, share: None });
         }
     }
     out.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -254,12 +258,22 @@ pub fn update(sites: &mut [Site], links: &mut Vec<Link>, adj: &Adjacency, popula
     let urban = population * p.urbanisation.clamp(0.0, 1.0);
     let rural_each = ((population - urban) / order.len().max(1) as f64).min(p.rural_cap);
     let alpha = 0.55 + 0.5 * p.urbanisation.clamp(0.0, 1.0);
-    let weights: Vec<f64> = order.iter().enumerate().map(|(rank, &i)| sites[i].score * ((rank + 1) as f64).dpowf(-alpha)).collect();
+    // Sites with measured shares keep them; the rank-size rule spreads the rest, never
+    // making a modelled town larger than the largest measured city.
+    let fixed: f64 = order.iter().filter_map(|&i| sites[i].share).sum::<f64>().min(1.0);
+    let cap = order.iter().filter_map(|&i| sites[i].share).fold(0.0, f64::max) * urban;
+    let weights: Vec<f64> = order.iter().enumerate().map(|(rank, &i)| if sites[i].share.is_some() { 0.0 } else { sites[i].score * ((rank + 1) as f64).dpowf(-alpha) }).collect();
     let total: f64 = weights.iter().sum::<f64>().max(1e-12);
+    let free = urban * (1.0 - fixed);
     let mut promotions = Vec::new();
     for (k, &i) in order.iter().enumerate() {
         let before = sites[i].tier();
-        sites[i].population = urban * weights[k] / total + rural_each;
+        let share = match sites[i].share {
+            Some(s) => urban * s,
+            None if cap > 0.0 => (free * weights[k] / total).min(cap),
+            None => free * weights[k] / total,
+        };
+        sites[i].population = share + rural_each;
         let after = sites[i].tier();
         if after > before {
             promotions.push((i, after));

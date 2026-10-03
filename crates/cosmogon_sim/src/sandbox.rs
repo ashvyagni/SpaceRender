@@ -92,12 +92,14 @@ pub enum Edit {
     SetStar { system: u32, property: StarProperty },
     /// Choose analytic (Kepler) or N-body gravity and its settings.
     SetPhysics { system: u32, nbody: bool, settings: PhysicsSettings },
+    /// Intervene in a civilization's history (limited; see `intervene`).
+    Intervene { system: u32, civ: u32, action: crate::intervene::Intervention },
 }
 
 impl Edit {
     pub fn system(&self) -> u32 {
         match self {
-            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } => *system,
+            Edit::AddBody { system, .. } | Edit::SetStar { system, .. } | Edit::SetPhysics { system, .. } | Edit::Intervene { system, .. } => *system,
             Edit::RemoveBody { body } | Edit::SetState { body, .. } | Edit::Impulse { body, .. } | Edit::SetOrbit { body, .. } | Edit::SetProperty { body, .. } => body.system,
         }
     }
@@ -380,6 +382,7 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
             _ => {}
         },
         Edit::SetPhysics { settings, .. } => finite_positive(settings.steps_per_orbit, "Steps per orbit")?,
+        Edit::Intervene { civ, action, .. } => crate::intervene::validate(u, *civ, action)?,
     }
     Ok(())
 }
@@ -419,6 +422,7 @@ fn describe(u: &Universe, e: &Edit) -> String {
                 "Fixed orbits (analytic Kepler)".into()
             }
         }
+        Edit::Intervene { civ, action, .. } => format!("{} — {}", action.label(), u.civs.get(*civ as usize).map(|c| c.name.as_str()).unwrap_or("?")),
     }
 }
 
@@ -427,6 +431,12 @@ impl Universe {
     pub fn apply_edit(&mut self, edit: Edit) -> Result<EditOutcome, String> {
         validate(self, &edit)?;
         let t = self.time;
+        // Interventions touch only the civilization: no gravity changes, no physics sync.
+        if let Edit::Intervene { civ, action, .. } = &edit {
+            let summary = self.apply_intervention(*civ, action);
+            self.edits.push(EditRecord { time: t, summary: summary.clone(), edit });
+            return Ok(EditOutcome { created: None, summary });
+        }
         let s = edit.system() as usize;
         let summary = describe(self, &edit);
         let wants_kepler = matches!(edit, Edit::SetPhysics { nbody: false, .. });
@@ -600,6 +610,7 @@ impl Universe {
                     sys.deactivate_dynamics(t)?;
                 }
             }
+            Edit::Intervene { .. } => unreachable!("handled above"),
         }
 
         let sys = &mut self.systems[s];
@@ -1108,7 +1119,7 @@ mod tests {
         assert!((u.time / SECONDS_PER_YEAR - 26.0).abs() < 0.01);
         let e = earth(&u);
         assert!(u.biosphere(e).unwrap().vegetated());
-        assert!(u.civs.is_empty());
+        assert_eq!(u.civs.len(), 1, "present-day humanity only");
         // Mars has no invented life.
         let mars = u.system(0).find_body("Mars").unwrap() as u32;
         assert_eq!(u.biosphere(BodyRef { system: 0, body: mars }).unwrap().stage, Stage::Sterile);

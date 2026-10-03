@@ -26,6 +26,8 @@ pub enum Government {
     Republic,
     Federation,
     WorldState,
+    /// A real present-day country (title is its name).
+    State,
 }
 
 impl Government {
@@ -37,6 +39,7 @@ impl Government {
             Government::Republic => "Republic",
             Government::Federation => "Federation",
             Government::WorldState => "World government",
+            Government::State => "State",
         }
     }
 }
@@ -73,6 +76,7 @@ impl Polity {
             Government::Republic => format!("Republic of {}", self.name),
             Government::Federation => format!("{} Federation", self.name),
             Government::WorldState => format!("United {}", self.name),
+            Government::State => self.name.clone(),
         }
     }
     fn relation(&self, other: u16) -> f32 {
@@ -80,7 +84,7 @@ impl Polity {
     }
 }
 
-fn color_for(id: u16) -> [u8; 3] {
+pub fn color_for(id: u16) -> [u8; 3] {
     // Golden-angle hues, fixed saturation/value: distinct and readable on dark terrain.
     let h = (id as f64 * 137.508).rem_euclid(360.0) / 60.0;
     let (s, v) = (0.62, 0.95);
@@ -121,6 +125,22 @@ pub struct PoliticsOutput {
     pub events: Vec<CivEvent>,
     pub war_deaths: f64,
     pub active_wars: u32,
+}
+
+/// Recount each polity's population and settlements from its territory.
+pub fn tally(sites: &[Site], polities: &mut [Polity]) {
+    for p in polities.iter_mut() {
+        p.population = 0.0;
+        p.sites = 0;
+    }
+    for s in sites.iter().filter(|s| s.active()) {
+        if let Some(pid) = s.polity {
+            if let Some(p) = polities.get_mut(pid as usize) {
+                p.population += s.population;
+                p.sites += 1;
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

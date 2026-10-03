@@ -150,8 +150,16 @@ pub fn draw_markers(
                 let off = if px > 6.0 { egui::vec2(px * 0.75, -px * 0.75) } else { egui::Vec2::ZERO };
                 label(&painter, sp + off, &b.name, if selected { ACCENT } else { color }, if b.parent.is_some() { &small } else { &font });
             }
+            if let Some(c) = u.civ_on(r) {
+                if labels || selected {
+                    let off = if px > 6.0 { egui::vec2(px * 0.75, -px * 0.75 + 14.0) } else { egui::vec2(0.0, 14.0) };
+                    let era = c.era(cosmogon_sim::civ::tech::TechGraph::embedded());
+                    label(&painter, sp + off, &format!("{} · {} · K {:.2} · {}", c.name, era, c.kardashev(), super::compact(c.population)), CIV, &small);
+                }
+            }
             for c in u.civs.iter().filter(|c| c.is_alive() && c.system == sid && c.colonies.iter().any(|col| col.body == i as u32)) {
-                label(&painter, sp + egui::vec2(0.0, 14.0), &format!("{} colony", c.species.name), CIV, &small);
+                let pop = c.colonies.iter().find(|col| col.body == i as u32).map(|col| col.population).unwrap_or(0.0);
+                label(&painter, sp + egui::vec2(0.0, 14.0), &format!("{} colony · {}", c.species.name, super::compact(pop)), CIV, &small);
             }
         }
     }
@@ -220,21 +228,41 @@ pub fn draw_markers(
                 label(&painter, sp, &format!("{}{} · {}", if is_capital { "★ " } else { "" }, s.name, super::compact(s.population)), egui::Color32::from_rgba_unmultiplied(255, 225, 170, (255.0 * alpha) as u8), &small);
             }
         }
-        // Satellites: representative dots on low orbits (visual exaggeration of altitude).
-        let n = c.satellites.min(160);
+        // Satellites in their real orbital families: low orbit (most), navigation constellations
+        // in medium orbit, and the geostationary belt where the orbital period equals the
+        // day (computed from this world's own mass and rotation). Up to 900 drawn; lit ones
+        // glint, those in the planet's shadow are faint.
+        let n = c.satellites.min(900);
+        let mu = b.mu();
+        let geo = (mu * (b.rotation_period.abs() / std::f64::consts::TAU).powi(2)).cbrt();
+        let geo_ok = geo > b.radius * 1.5 && !b.tidally_locked;
+        // Inertial equatorial frame (the spin axis without the daily rotation).
+        let tilt = (crate::render::sim_to_render_rot() * Quat::from_rotation_x(b.axial_tilt as f32)).as_dquat();
+        let spin = u.system(c.system).spin_angle(c.body as usize, t);
+        let sun_dir = (to_render(u.system(c.system).star_position(t)) - center).normalize();
         for k in 0..n {
             let h = cosmogon_sim::rng::mix(c.id as u64 * 7919 + 13, k as u64);
             let fr = |s: u32| ((h >> s) & 0xFFFF) as f64 / 65535.0;
-            let inc = (fr(0) - 0.5) * 2.6;
+            let family = fr(0);
+            let geo_sat = family >= 0.93 && geo_ok;
+            let (radius, inc) = if family < 0.86 {
+                (b.radius * (1.04 + 0.12 * fr(32)), (fr(16) - 0.5) * 3.0)
+            } else if family < 0.93 {
+                (b.radius * (3.0 + 1.6 * fr(32)), 0.96)
+            } else if geo_sat {
+                (geo * (1.0 + 0.002 * (fr(32) - 0.5)), 0.0)
+            } else {
+                (b.radius * 2.0, 0.3)
+            };
             let node = fr(16) * std::f64::consts::TAU;
-            let alt = 1.06 + 0.12 * fr(32);
-            let period = 5400.0 * alt.powf(1.5);
-            let ang = fr(48) * std::f64::consts::TAU + t / period * std::f64::consts::TAU;
-            let p0 = DVec3::new(ang.cos(), 0.0, ang.sin());
-            let p1 = DVec3::new(p0.x, p0.z * inc.sin(), p0.z * inc.cos());
-            let p2 = DVec3::new(p1.x * node.cos() - p1.z * node.sin(), p1.y, p1.x * node.sin() + p1.z * node.cos());
-            let wp = center + p2 * b.radius * alt;
-            // Hide when behind the planet.
+            let period = std::f64::consts::TAU * (radius.powi(3) / mu.max(1.0)).sqrt();
+            // Geostationary satellites hang over fixed longitudes and turn with the planet.
+            let ang = fr(48) * std::f64::consts::TAU + if geo_sat { spin } else { (t / period).fract() * std::f64::consts::TAU };
+            // Equatorial frame of the body (its spin axis), then inclination and node.
+            let p0 = DVec3::new(ang.cos(), ang.sin(), 0.0);
+            let p1 = DVec3::new(p0.x, p0.y * inc.cos(), p0.y * inc.sin());
+            let p2 = DVec3::new(p1.x * node.cos() - p1.y * node.sin(), p1.x * node.sin() + p1.y * node.cos(), p1.z);
+            let wp = center + tilt * (p2 * radius);
             let rel = wp - view.origin;
             let along = rel.normalize();
             let to_center = center - view.origin;
@@ -243,8 +271,107 @@ pub fn draw_markers(
             if behind {
                 continue;
             }
+            // In the planet's shadow?
+            let off = wp - center;
+            let s_along = off.dot(sun_dir);
+            let shadowed = s_along < 0.0 && (off.length_squared() - s_along * s_along) < b.radius * b.radius;
             if let Some(sp) = project(wp) {
-                painter.circle_filled(sp, 1.3, egui::Color32::from_rgba_unmultiplied(200, 240, 255, (200.0 * alpha) as u8));
+                let a = if shadowed { 70.0 } else { 235.0 } * alpha;
+                let (rgb, size) = if geo_sat { ((255, 210, 120), 1.8) } else if family >= 0.86 { ((160, 255, 190), 1.6) } else { ((140, 225, 255), 1.4) };
+                painter.circle_filled(sp, if shadowed { size * 0.7 } else { size }, egui::Color32::from_rgba_unmultiplied(rgb.0, rgb.1, rgb.2, a as u8));
+            }
+        }
+        // The geostationary (Clarke) belt as a faint ring, so the GEO family reads at a glance.
+        if geo_ok && c.satellites > 50 {
+            let mut prev: Option<egui::Pos2> = None;
+            for k in 0..=96 {
+                let a = k as f64 / 96.0 * std::f64::consts::TAU;
+                let wp = center + tilt * (DVec3::new(a.cos(), a.sin(), 0.0) * geo);
+                let rel = wp - view.origin;
+                let to_center = center - view.origin;
+                let along = rel.normalize();
+                let tca = to_center.dot(along);
+                let hidden = tca > 0.0 && (to_center.length_squared() - tca * tca) < b.radius * b.radius && rel.length() > tca;
+                let p = if hidden { None } else { project(wp) };
+                if let (Some(a0), Some(a1)) = (prev, p) {
+                    painter.line_segment([a0, a1], egui::Stroke::new(1.0_f32, egui::Color32::from_rgba_unmultiplied(255, 210, 120, (45.0 * alpha) as u8)));
+                }
+                prev = p;
+            }
+        }
+        // Orbital stations.
+        if c.flags.contains("stations") {
+            for k in 0..3u64 {
+                let radius = b.radius * (1.07 + 0.05 * k as f64);
+                let period = std::f64::consts::TAU * (radius.powi(3) / mu.max(1.0)).sqrt();
+                let ang = k as f64 * 2.1 + (t / period).fract() * std::f64::consts::TAU;
+                let inc = 0.4 + 0.3 * k as f64;
+                let p = DVec3::new(ang.cos(), ang.sin() * inc.cos(), ang.sin() * inc.sin());
+                let wp = center + tilt * (p * radius);
+                if let Some(sp) = project(wp) {
+                    painter.rect_filled(egui::Rect::from_center_size(sp, egui::vec2(5.0, 3.0)), 1.0, egui::Color32::from_rgba_unmultiplied(255, 236, 190, (240.0 * alpha) as u8));
+                    if labels && px > 200.0 {
+                        label(&painter, sp, "station", egui::Color32::from_rgba_unmultiplied(255, 236, 190, (200.0 * alpha) as u8), &small);
+                    }
+                }
+            }
+        }
+    }
+
+    // Spacecraft in flight between worlds: a gentle arc from the homeworld to the target.
+    for c in u.civs.iter().filter(|c| c.is_alive() && !ui_state.hidden) {
+        let sys = u.system(c.system);
+        if focus_sys != Some(c.system) {
+            continue;
+        }
+        let home = to_render(sys.body_position(c.body as usize, t));
+        for m in &c.missions {
+            let Some(target) = sys.bodies.get(m.body as usize).filter(|b| b.exists()) else { continue };
+            let _ = target;
+            let dest = to_render(sys.body_position(m.body as usize, t));
+            let span = dest - home;
+            let side = span.cross(DVec3::Y).normalize_or_zero() * span.length() * 0.18;
+            let at = |s: f64| home + span * s + side * (std::f64::consts::PI * s).sin();
+            let colony = m.kind == cosmogon_sim::civ::space::MissionKind::Colony;
+            let color = if colony { CIV } else { egui::Color32::from_rgb(140, 215, 255) };
+            // Faint dotted path.
+            for k in 0..32 {
+                if k % 2 == 1 {
+                    continue;
+                }
+                if let (Some(a), Some(bp)) = (project(at(k as f64 / 32.0)), project(at((k + 1) as f64 / 32.0))) {
+                    painter.line_segment([a, bp], egui::Stroke::new(1.0_f32, color.gamma_multiply(0.25)));
+                }
+            }
+            if let Some(sp) = project(at(m.progress(t))) {
+                painter.circle_filled(sp, if colony { 3.0 } else { 2.2 }, color);
+                if labels {
+                    label(&painter, sp, &m.name, color, &small);
+                }
+            }
+        }
+        // Colony sites on their worlds.
+        for col in &c.colonies {
+            let r = BodyRef { system: c.system, body: col.body };
+            let Some(cb) = sys.bodies.get(col.body as usize) else { continue };
+            let center = to_render(sys.body_position(col.body as usize, t));
+            let px = view.screen_radius(center, cb.radius);
+            if px < 30.0 {
+                continue;
+            }
+            let (lat, lon) = crate::render::colony_site(c.id, col.body);
+            let d = cosmogon_sim::planet::terrain::dir_from_lat_lon(lat, lon);
+            let rot = body_rotation(&sim, r, t).as_dquat();
+            let n = rot * DVec3::new(d[0], d[1], d[2]);
+            if n.dot((view.origin - center).normalize()) < 0.05 {
+                continue;
+            }
+            if let Some(sp) = project(center + n * cb.radius) {
+                painter.circle_filled(sp, 3.5, CIV);
+                painter.circle_stroke(sp, 6.5, egui::Stroke::new(1.0_f32, CIV.gamma_multiply(0.6)));
+                if labels {
+                    label(&painter, sp, &format!("{} colony", c.species.name), CIV, &small);
+                }
             }
         }
     }

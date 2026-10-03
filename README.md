@@ -47,6 +47,18 @@ read-only; clone it to experiment. Time runs from real time to 100 million years
   chronicle reports what happened and why.
 * **Honest data**: every value is labelled MEASURED, DERIVED, ESTIMATED, PROCEDURAL or USER MODIFIED.
 * Sandboxes save to their own folders with autosave, checkpoints, duplicates and thumbnails; **Continue** resumes.
+* **Interfere** in a civilization — inspire it, send a signal, share knowledge, teach a technology it is ready
+  for, or test it with hardship — once every 25 years, never skipping what its own history must earn.
+
+## Worlds and civilizations you can see
+* Every world has its own look, chosen from physics or spacecraft imagery: Io's volcanoes, Europa's cracked ice,
+  Jupiter's belts and Great Red Spot, Saturn's hexagon and measured rings, Titan's haze, Venus's clouds — and
+  exoplanets from lava worlds and mini-Neptunes to Sudarsky-class giants and glowing hot Jupiters.
+* Atmospheric scattering, eclipses (moons' shadows), ring shadows, living stellar surfaces.
+* The Solar System Lab starts with **humanity in 2026**: real cities and countries, 11 000 satellites, the real
+  exploration record and missions in flight (BepiColombo, Europa Clipper, JUICE).
+* Civilizations show their era, Kardashev rating and next breakthroughs; their satellites, stations, spacecraft
+  and colonies are visible in space, their cities and farmland on the ground.
 
 ## What's simulated
 Stars that brighten and die · Keplerian orbits exact at any time scale · procedural systems with statistically
@@ -67,7 +79,7 @@ there · **Home** for the whole system · **Space** pause · **, .** speed · **
 **Esc** menu.
 
 ## Documentation
-[Sandbox vision](docs/SANDBOX_VISION.md) · [Milestone S1 status](docs/MILESTONE_S1.md) ·
+[Sandbox vision](docs/SANDBOX_VISION.md) · [Milestone S1 status](docs/MILESTONE_S1.md) · [G1 + C1](docs/MILESTONE_G1_C1.md) ·
 [Physics engine](docs/PHYSICS_ENGINE.md) · [Data sources](docs/DATA_SOURCES.md) · [Object model](docs/OBJECT_MODEL.md) ·
 [Save format](docs/SAVE_FORMAT.md) · [UI system](docs/UI_SYSTEM.md) · [Gap analysis](docs/GAP_ANALYSIS.md) ·
 [ARCHITECTURE](ARCHITECTURE.md) · [ROADMAP](ROADMAP.md) · [SIMULATION](SIMULATION.md) ·

@@ -10,6 +10,7 @@ use cosmogon_core::dmath::DMath;
 pub mod knowledge;
 pub mod polity;
 pub mod settlements;
+pub mod space;
 pub mod species;
 pub mod tech;
 
@@ -192,6 +193,21 @@ pub struct Civilization {
     pub colony_timer: f64,
     #[serde(default)]
     pub probe_timer: f64,
+    /// Spacecraft in flight within the home system.
+    #[serde(default)]
+    pub missions: Vec<space::Mission>,
+    /// Worlds of the home system visited so far, and how closely.
+    #[serde(default)]
+    pub explored: Vec<space::Explored>,
+    #[serde(default)]
+    pub missions_launched: u32,
+    /// When the sandbox user last intervened (interventions have a cooldown).
+    #[serde(default)]
+    pub last_intervention: Option<f64>,
+    /// Polities are real countries that the model must not reshape (present-day Earth):
+    /// they keep their territory; no wars or conquests between them are simulated.
+    #[serde(default)]
+    pub static_polities: bool,
 
     #[serde(skip)]
     known_cache: KnownCache,
@@ -236,8 +252,8 @@ pub struct CivEvent {
 pub struct WorldView<'a> {
     pub env: Environment,
     pub surface: SurfaceContext,
-    /// Candidate colony targets in the home system: (body index, desirability).
-    pub colony_targets: Vec<(u32, f64)>,
+    /// Other worlds of the home system: transfer times and colony suitability.
+    pub destinations: Vec<space::Destination>,
     pub params: &'a ScienceParams,
     pub tech_rate: f64,
 }
@@ -319,9 +335,25 @@ impl Civilization {
             settlement_timer: 10.0,
             colony_timer: 0.0,
             probe_timer: 0.0,
+            missions: Vec::new(),
+            explored: Vec::new(),
+            missions_launched: 0,
+            last_intervention: None,
+            static_polities: false,
             known_cache: KnownCache::default(),
             adjacency: settlements::Adjacency::default(),
         }
+    }
+
+    /// Carrying capacity on `body` with the civilization's current technology.
+    pub fn capacity_for(&self, body: &Body, climate_stability: f64) -> f64 {
+        let area = match self.species.habitat {
+            Habitat::Land => body.surface_area_km2() * body.land_fraction(),
+            Habitat::Water => body.surface_area_km2() * body.hydro.ocean_fraction * 0.25,
+        };
+        let fertility = (body.resources.fertile_land * 0.35).max(0.03);
+        let climate_stress = (((body.temperature - self.baseline_temperature).abs() - 1.5).max(0.0) / 6.0).min(1.0);
+        area * fertility * 0.05 * (0.7 + 0.3 * climate_stability) * self.capacity_mult * (1.0 - 0.6 * climate_stress) * (1.0 - 0.5 * self.energy_shortfall)
     }
 
     pub fn is_alive(&self) -> bool {
@@ -448,15 +480,10 @@ impl Civilization {
         self.pressures.decay(dt);
 
         // ── Carrying capacity & population ──────────────────────────────
-        let area = match self.species.habitat {
-            Habitat::Land => body.surface_area_km2() * body.land_fraction(),
-            Habitat::Water => body.surface_area_km2() * body.hydro.ocean_fraction * 0.25,
-        };
-        let fertility = (body.resources.fertile_land * 0.35).max(0.03);
         let climate_stress = ((body.temperature - self.baseline_temperature).abs() - 1.5).max(0.0) / 6.0;
         self.pressures.climate = climate_stress.min(1.0);
         let stable = world.env.values.get(&EnvKey::ClimateStability).copied().unwrap_or(1.0);
-        self.capacity = area * fertility * 0.05 * (0.7 + 0.3 * stable) * self.capacity_mult * (1.0 - 0.6 * climate_stress.min(1.0)) * (1.0 - 0.5 * self.energy_shortfall);
+        self.capacity = self.capacity_for(body, stable);
         let r = (cp.base_growth_rate + self.growth_bonus) * (1.0 + self.health).max(0.2);
         let p = self.population;
         // Exact logistic solution over dt (stable for any step size).
@@ -540,6 +567,20 @@ impl Civilization {
         }
 
         // ── Energy, fossil fuels and climate forcing ────────────────────
+        // Energy transition: with alternatives known, the fossil share falls towards their
+        // floor — slowly by default, quickly once depletion or energy pressure bites.
+        let alternatives = [("renewables", 0.3), ("nuclear_power", 0.6), ("fusion_power", 0.05)]
+            .iter()
+            .filter(|(id, _)| self.flags.contains(*id) || self.knows(id))
+            .map(|(_, cap)| *cap)
+            .fold(f64::INFINITY, f64::min);
+        if alternatives.is_finite() && self.fossil_share > alternatives * 0.3 {
+            let use_per_year = self.population * self.energy_per_capita * self.fossil_share * SECONDS_PER_YEAR / FOSSIL_JOULES_PER_UNIT;
+            let years_left = (body.resources.coal + body.resources.oil) / use_per_year.max(1e-12);
+            let urgency = (self.pressures.energy + self.pressures.climate * 0.5 + (80.0 / years_left.max(1.0)).min(1.0)).min(1.5);
+            let floor = alternatives * 0.3;
+            self.fossil_share -= (self.fossil_share - floor) * relax(0.004 + 0.02 * urgency, dt);
+        }
         let demand_w = self.population * self.energy_per_capita;
         let fossil_w = demand_w * self.fossil_share;
         let reserves = body.resources.coal + body.resources.oil;
@@ -634,7 +675,11 @@ impl Civilization {
             }
             let knows_agriculture = self.knows("agriculture");
             let promotions = settlements::update(&mut self.sites, &mut self.links, &self.adjacency, self.population, &p, t);
-            let politics = polity::update(
+            let politics = if self.static_polities {
+                polity::tally(&self.sites, &mut self.polities);
+                polity::PoliticsOutput { events: Vec::new(), war_deaths: 0.0, active_wars: 0 }
+            } else {
+                polity::update(
                 &mut self.sites,
                 &mut self.polities,
                 &self.adjacency,
@@ -649,7 +694,8 @@ impl Civilization {
                 elapsed,
                 t,
                 rng,
-            );
+            )
+            };
             if politics.war_deaths > 0.0 {
                 let frac = politics.war_deaths.min(0.5);
                 self.population *= 1.0 - frac;
@@ -683,21 +729,7 @@ impl Civilization {
                 self.satellites += 1 + (target - self.satellites) / 20;
             }
         }
-        self.colony_timer += dt;
-        if self.flags.contains("colonies") && self.colony_timer >= 25.0 {
-            self.colony_timer = 0.0;
-            let settled: BTreeSet<u32> = self.colonies.iter().map(|c| c.body).collect();
-            if let Some(&(target_body, _)) = world.colony_targets.iter().filter(|(b, _)| !settled.contains(b)).max_by(|a, b| a.1.total_cmp(&b.1)) {
-                if rng.chance(0.5) {
-                    self.colonies.push(Colony { body: target_body, founded: t, population: 50.0 });
-                    ev.push(CivEvent { importance: 5, category: C::Space, title: "New colony founded".into(), detail: format!("A permanent settlement is established on body #{target_body}") });
-                }
-            }
-        }
-        for c in &mut self.colonies {
-            let cap = 2.0e6;
-            c.population = cap / (1.0 + (cap / c.population.max(1.0) - 1.0) * (-0.03 * dt).dexp());
-        }
+        ev.extend(self.step_space(&world.destinations, t, dt, rng));
 
         if self.population < 500.0 {
             self.status = CivStatus::Extinct { at: t };

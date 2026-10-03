@@ -229,5 +229,5 @@ mod golden {
         assert_eq!(fp, GOLDEN, "universe fingerprint changed: {fp:#018x}");
     }
 
-    const GOLDEN: u64 = 0x3038_60a1_bd97_4fba;
+    const GOLDEN: u64 = 0x8094_860f_b438_e6ba;
 }

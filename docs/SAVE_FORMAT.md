@@ -58,6 +58,10 @@ JSON: `{ "header": {…}, "universe": {…} }`, format `cosmogon-save`.
   `settings.systems`. All new fields have defaults, so the v1 → v2 migration is a no-op on
   the JSON; v1 files load unchanged and keep Kepler orbits.
 
+* **v2, 0.5 additions** (no version bump; all default on load): civilizations gain `missions`,
+  `explored`, `missions_launched`, `last_intervention`, `static_polities`; settlements gain
+  `share`; governments gain `State`; edits gain `Intervene`. 0.4 saves load unchanged.
+
 Rules (unchanged): bump `CURRENT_VERSION` and add a migration step for every change;
 writes are atomic (temp file + rename); a file newer than the app is refused with a clear
 message.

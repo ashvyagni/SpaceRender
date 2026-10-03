@@ -11,8 +11,8 @@ the audit [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and the S1 status [docs/M
 | # | Milestone | Status |
 |---|---|---|
 | S1 | Sandbox foundation: home & sandbox documents, JPL data, object schema & provenance, creator, editable inspector, N-body, launch, prediction, collisions, undo/redo, physics tests, orbit → climate | ✅ 0.4.0 |
-| **G1** | **Graphics upgrade** (requested next): every planet as detailed close up as Earth, Moon and Mars — gas-giant banding and storms, Venus/Titan hazes, icy-moon terrain, Mercury/Io/Callisto surfaces from real global mosaics where licensable; atmospheric scattering, ocean shading, volumetric clouds, rings with shadows, eclipses | ⬜ next |
-| **C1** | **Civilization visibility** (requested next): progress & technology at a glance on habitable worlds, visible cities and infrastructure, satellites and spacecraft as objects, colonies on other planets, exploration of the system and beyond; player interventions that respect the simulation | ⬜ next |
+| **G1** | **Graphics upgrade** (requested next): every planet as detailed close up as Earth, Moon and Mars — gas-giant banding and storms, Venus/Titan hazes, icy-moon terrain, Mercury/Io/Callisto surfaces from real global mosaics where licensable; atmospheric scattering, ocean shading, volumetric clouds, rings with shadows, eclipses | ✅ 0.5.0 ([details](docs/MILESTONE_G1_C1.md)) |
+| **C1** | **Civilization visibility** (requested next): progress & technology at a glance on habitable worlds, visible cities and infrastructure, satellites and spacecraft as objects, colonies on other planets, exploration of the system and beyond; player interventions that respect the simulation | ✅ 0.5.0 ([details](docs/MILESTONE_G1_C1.md)) |
 | S2 | Physical consequence pipeline: seasons and eccentric insolation, thermal inertia, sea level, migration, economic response; present-day humanity in the Lab | ⬜ |
 | S3 | Solar System expansion: JPL small bodies, comet tails, atmospheric entry, fragmentation, tides, Roche disruption, Hill/SOI/Lagrange overlays, drag-to-launch | ⬜ |
 | S4 | Real-universe data platform (ingestion, spatial index, streaming, dataset versions UI) | ⬜ |
@@ -105,7 +105,6 @@ Windows build + GitHub release pipeline.
 
 ## Known limitations (honest list)
 * See [docs/MILESTONE_S1.md](docs/MILESTONE_S1.md) for what the sandbox approximates.
-* Planets other than Earth, Moon and Mars lack close-up surface detail (graphics milestone G1).
 * Close-up terrain is vertex-coloured relief without textures, vegetation, cities or volumetric clouds yet;
   at very low altitude it looks smooth-sculpted rather than photographic (Phase 3/10).
 * Earth's moisture/biome pattern is procedural; only relief is real (Köppen climate data planned).

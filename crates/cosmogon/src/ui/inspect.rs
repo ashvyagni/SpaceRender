@@ -201,6 +201,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                 let sub = format!("{} in the {} system", b.class().label(), u.system(r.system).name);
                 ui.label(egui::RichText::new(sub).color(MUTED).size(12.0));
                 ui.label(egui::RichText::new(b.source_label()).color(MUTED).size(10.5)).on_hover_text("Where this object's values come from. See the DATA tab.");
+                ui.label(egui::RichText::new(format!("Appearance: {}", crate::render::look::Look::of(b).label)).color(MUTED).size(10.5)).on_hover_text("How this world is drawn, chosen from its physical state (or spacecraft imagery for real worlds). Visual only.");
                 if let Some(rm) = &b.removed {
                     let how = match rm.cause {
                         RemovalCause::Deleted => "Deleted".to_string(),
@@ -235,7 +236,7 @@ pub fn right_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mu
                     BodyTab::Life => life(ui, u, r),
                     BodyTab::Civilization => {
                         if let Some(c) = u.civs.iter().rev().find(|c| c.system == r.system && c.body == r.body) {
-                            civilization(ui, u, c, &mut ui_state);
+                            civilization(ui, u, c, &mut ui_state, &mut ctx);
                         }
                     }
                     BodyTab::History => history_tab(ui, u, r),
@@ -655,11 +656,225 @@ fn life(ui: &mut egui::Ui, u: &Universe, r: BodyRef) {
     }
 }
 
-fn civilization(ui: &mut egui::Ui, u: &Universe, c: &Civilization, ui_state: &mut UiState) {
+/// Eras in the order the technology graph introduces them.
+fn eras(graph: &TechGraph) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    for t in &graph.techs {
+        if !v.contains(&t.era) {
+            v.push(t.era.clone());
+        }
+    }
+    v
+}
+
+/// The civilization at a glance: era and progress, energy (Kardashev), people, reach into
+/// space, and what is likely to come next.
+fn glance(ui: &mut egui::Ui, u: &Universe, c: &Civilization) {
+    let graph = TechGraph::embedded();
+    let era = c.era(graph);
+    let all = eras(graph);
+    let idx = all.iter().position(|e| *e == era).unwrap_or(0);
+    let in_era = graph.techs.iter().filter(|t| t.era == era).count().max(1);
+    let known_in_era = graph.techs.iter().filter(|t| t.era == era && c.knows(&t.id)).count();
+    egui::Frame::new().fill(egui::Color32::from_rgb(22, 19, 12)).corner_radius(8).inner_margin(10).stroke(egui::Stroke::new(1.0_f32, CIV.gamma_multiply(0.4))).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(era.to_uppercase()).size(15.0).strong().color(CIV).extra_letter_spacing(1.5));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(format!("era {} of {}", idx + 1, all.len())).color(MUTED).size(11.0));
+            });
+        });
+        // Progress through the eras: completed segments, then the current one partly filled.
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 8.0), egui::Sense::hover());
+        let seg = rect.width() / all.len() as f32;
+        for k in 0..all.len() {
+            let r = egui::Rect::from_min_size(rect.min + egui::vec2(seg * k as f32 + 1.0, 0.0), egui::vec2(seg - 2.0, rect.height()));
+            ui.painter().rect_filled(r, 2.0, egui::Color32::from_rgb(45, 40, 30));
+            let fill = if k < idx { 1.0 } else if k == idx { known_in_era as f32 / in_era as f32 } else { 0.0 };
+            if fill > 0.0 {
+                ui.painter().rect_filled(egui::Rect::from_min_size(r.min, egui::vec2(r.width() * fill, r.height())), 2.0, CIV);
+            }
+        }
+        if let Some(next) = all.get(idx + 1) {
+            ui.label(egui::RichText::new(format!("{known_in_era}/{in_era} {era} technologies · next era: {next}")).size(11.0).color(MUTED));
+        }
+        ui.add_space(4.0);
+        egui::Grid::new("glance").num_columns(4).spacing([12.0, 2.0]).show(ui, |ui| {
+            let big = |ui: &mut egui::Ui, v: String, l: &str| {
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(v).size(15.0).strong().color(TEXT)).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add(egui::Label::new(egui::RichText::new(l).size(10.0).color(MUTED)).wrap_mode(egui::TextWrapMode::Extend));
+                })
+                .response
+            };
+            big(ui, compact(c.population), "people");
+            big(ui, format!("{}/{}", c.discoveries.len(), graph.len()), "techs");
+            big(ui, format!("{:.2}", c.kardashev()), "K-scale").on_hover_text("Energy use on Sagan's scale: K = (log₁₀ P[W] − 6)/10. Planetary mastery is 1.0; Earth today ≈ 0.73.");
+            big(ui, power(c.total_power_w()), "power");
+            ui.end_row();
+        });
+        ui.add_space(4.0);
+        // The ladder into space.
+        ui.horizontal_wrapped(|ui| {
+            for (label, flag, tip) in [
+                ("Orbit", "satellites", "Artificial satellites"),
+                ("Crew", "crewed_orbit", "Crewed spaceflight"),
+                ("Moon", "moon_landing", "Landing on a moon"),
+                ("Stations", "stations", "Orbital stations and industry"),
+                ("Colonies", "colonies", "Self-sustaining settlements on other worlds"),
+                ("Stars", "probes", "Interstellar probes"),
+            ] {
+                let on = c.flags.contains(flag);
+                let text = if on { egui::RichText::new(label).size(11.5).strong().color(CIV) } else { egui::RichText::new(label).size(11.5).color(MUTED.gamma_multiply(0.6)) };
+                ui.label(text).on_hover_text(tip);
+            }
+        });
+        // Most likely next breakthroughs, with expected waiting times from the discovery rate.
+        let body = u.body(BodyRef { system: c.system, body: c.body });
+        let sys = u.system(c.system);
+        let moons = sys.moons_of(c.body as usize).count();
+        let others = sys.bodies.iter().enumerate().filter(|(i, x)| *i != c.body as usize && x.kind.has_surface() && x.mass > 1e21).count();
+        let env = environment_for(body, moons, others, u.time);
+        let mut known = vec![false; graph.len()];
+        for d in &c.discoveries {
+            if let Some(i) = graph.find(&d.tech) {
+                known[i] = true;
+            }
+        }
+        let has = |f: &str| c.flags.contains(f);
+        let tctx = cosmogon_sim::civ::tech::Context { known: &known, knowledge: &c.knowledge, resources: &body.resources, env: &env, habitat: c.species.habitat, population: c.population, flags: &has };
+        let mut next: Vec<(f64, String)> = (0..graph.len())
+            .filter_map(|i| {
+                let (_, speed, surplus) = graph.available(i, &tctx)?;
+                let t = &graph.techs[i];
+                let demand = t.demand.as_deref().map(|d| c.pressures.get(d)).unwrap_or(0.0);
+                let rate = speed * surplus.powf(1.5) * (1.0 + 2.0 * demand) * u.settings.tech_rate / t.years;
+                Some((1.0 / rate.max(1e-12), t.name.clone()))
+            })
+            .collect();
+        next.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if next.is_empty() {
+            // The nearest goal: prerequisite technologies known, only knowledge short.
+            let closest = (0..graph.len())
+                .filter(|&i| !known[i])
+                .filter_map(|i| {
+                    let t = &graph.techs[i];
+                    if !t.requires.iter().all(|cond| matches!(cond, cosmogon_sim::civ::tech::Condition::Knowledge(..)) || graph.check(cond, &tctx)) {
+                        return None;
+                    }
+                    let gaps: Vec<(f64, String)> = t
+                        .requires
+                        .iter()
+                        .filter_map(|cond| match cond {
+                            cosmogon_sim::civ::tech::Condition::Knowledge(d, n) if c.knowledge[d.index()] < *n => Some((c.knowledge[d.index()] / n, d.name().to_string())),
+                            _ => None,
+                        })
+                        .collect();
+                    let worst = gaps.iter().map(|g| g.0).fold(1.0, f64::min);
+                    Some((worst, t.name.clone(), gaps.into_iter().map(|g| format!("{} {:.0}%", g.1, g.0 * 100.0)).collect::<Vec<_>>().join(", ")))
+                })
+                .max_by(|a, b| a.0.total_cmp(&b.0));
+            match closest {
+                Some((_, name, gaps)) => ui.label(egui::RichText::new(format!("Closest goal: {name} — knowledge {gaps} of the way")).size(11.0).color(MUTED)),
+                None => ui.label(egui::RichText::new("Next: nothing within reach yet — knowledge must grow").size(11.0).color(MUTED)),
+            };
+        } else {
+            let items: Vec<String> = next.iter().take(3).map(|(y, n)| format!("{n} (~{} yr)", if *y < 10.0 { format!("{y:.0}") } else { compact(*y) })).collect();
+            ui.label(egui::RichText::new(format!("Within reach: {}", items.join(" · "))).size(11.0).color(LIFE));
+        }
+    });
+}
+
+/// Satellites, missions in flight, the exploration record and colonies.
+fn space_programme(ui: &mut egui::Ui, u: &Universe, c: &Civilization) {
+    if c.satellites == 0 && c.explored.is_empty() && c.missions.is_empty() && c.colonies.is_empty() {
+        return;
+    }
+    let sys = u.system(c.system);
+    let name = |b: u32| sys.bodies.get(b as usize).map(|x| x.name.clone()).unwrap_or_default();
+    heading(ui, "Space programme");
+    egui::Grid::new("space").num_columns(2).striped(true).show(ui, |ui| {
+        kv(ui, "Satellites", group_digits(c.satellites as f64));
+        kv(ui, "Missions launched", c.missions_launched.to_string());
+        for col in &c.colonies {
+            kv(ui, &format!("Colony · {}", name(col.body)), format!("{} people, since {}", compact(col.population), format_date(col.founded, u.start_time, u.gregorian())));
+        }
+    });
+    if !c.missions.is_empty() {
+        ui.label(egui::RichText::new("In flight").size(11.5).color(MUTED));
+        for m in &c.missions {
+            let p = m.progress(u.time);
+            bar(ui, &format!("{} → {}", m.name, name(m.body)), p, if m.kind == cosmogon_sim::civ::space::MissionKind::Colony { CIV } else { egui::Color32::from_rgb(140, 210, 255) }, &format!("{} · arrives {}", m.kind.label(), format_date(m.arrives, u.start_time, u.gregorian())));
+        }
+    }
+    if !c.explored.is_empty() {
+        ui.label(egui::RichText::new("Worlds visited").size(11.5).color(MUTED));
+        let mut ex: Vec<_> = c.explored.iter().filter(|e| e.body != c.body).collect();
+        ex.sort_by(|a, b| a.first.total_cmp(&b.first));
+        for e in ex {
+            ui.label(egui::RichText::new(format!("{} — {} · first reached {}", name(e.body), e.level.label(), format_date(e.first, u.start_time, u.gregorian()))).size(11.5));
+        }
+    }
+}
+
+/// Limited sandbox interventions.
+fn interfere(ui: &mut egui::Ui, u: &Universe, ci: u32, c: &Civilization, ctx: &mut Ctx, ui_state: &mut UiState) {
+    use cosmogon_sim::intervene::{cooldown_left, teachable, Intervention, COOLDOWN_YEARS};
+    if !ctx.editable {
+        return;
+    }
+    heading(ui, "Interfere");
+    let wait = cooldown_left(c, u.time);
+    ui.label(egui::RichText::new(format!("One nudge every {COOLDOWN_YEARS:.0} years. You can teach only what their own technology and world allow, and each act is recorded and undoable.")).size(11.0).color(MUTED));
+    if wait > 0.0 {
+        ui.label(egui::RichText::new(format!("Available again in {wait:.0} years")).color(ACCENT));
+        return;
+    }
+    let mut act = |a: Intervention| ctx.edits.push(Edit::Intervene { system: c.system, civ: ci, action: a });
+    ui.horizontal_wrapped(|ui| {
+        if ui.button("Inspire").on_hover_text("Stability +20%, war and famine pressures ease").clicked() {
+            act(Intervention::Inspire);
+        }
+        if ui.button("Send a signal").on_hover_text("They detect an unexplained artificial signal: astronomy and space research surge").clicked() {
+            act(Intervention::Signal);
+        }
+        if ui.button(egui::RichText::new("Hardship").color(DANGER)).on_hover_text("An epidemic kills 2–10%; medicine becomes urgent").clicked() {
+            act(Intervention::Hardship);
+        }
+    });
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("share_domain").selected_text(Domain::ALL[ui_state.share_domain as usize % Domain::ALL.len()].name()).show_ui(ui, |ui| {
+            for (k, d) in Domain::ALL.iter().enumerate() {
+                ui.selectable_value(&mut ui_state.share_domain, k as u8, d.name());
+            }
+        });
+        if ui.button("Share knowledge").on_hover_text("+50% in that field (at most +50 million insight)").clicked() {
+            act(Intervention::ShareKnowledge(ui_state.share_domain));
+        }
+    });
+    let graph = TechGraph::embedded();
+    let teach = teachable(u, c);
+    if !teach.is_empty() {
+        ui.label(egui::RichText::new("Teach a technology (prerequisites already known):").size(11.0).color(MUTED));
+        ui.horizontal_wrapped(|ui| {
+            for i in teach.into_iter().take(8) {
+                let t = &graph.techs[i];
+                if ui.small_button(&t.name).on_hover_text(&t.description).clicked() {
+                    act(Intervention::Teach(t.id.clone()));
+                }
+            }
+        });
+    }
+}
+
+fn civilization(ui: &mut egui::Ui, u: &Universe, c: &Civilization, ui_state: &mut UiState, ctx: &mut Ctx) {
     let graph = TechGraph::embedded();
     ui.label(egui::RichText::new(&c.name).size(17.0).strong().color(CIV));
     ui.label(egui::RichText::new(format!("{} · {} · founded {}", c.era(graph), status_label(c), format_date(c.founded, u.start_time, u.gregorian()))).color(MUTED).size(12.0));
     ui.add_space(4.0);
+    glance(ui, u, c);
+    ui.add_space(6.0);
+    let ci = u.civs.iter().position(|x| std::ptr::eq(x, c)).unwrap_or(0) as u32;
     egui::Grid::new("civ").num_columns(2).striped(true).show(ui, |ui| {
         kv(ui, "Population", format!("{} (capacity {})", compact(c.population), compact(c.capacity)));
         kv(ui, "Settlements", format!("{} ({}% urban)", c.sites.iter().filter(|s| s.active()).count(), (c.urbanisation * 100.0).round()));
@@ -673,17 +888,13 @@ fn civilization(ui: &mut egui::Ui, u: &Universe, c: &Civilization, ui_state: &mu
         if let Some(r) = c.radio_since {
             kv(ui, "Radio sphere", format!("{:.2} ly", (u.time - r) / SECONDS_PER_YEAR));
         }
-        if c.satellites > 0 {
-            kv(ui, "Satellites", c.satellites.to_string());
-        }
-        if !c.colonies.is_empty() {
-            let names: Vec<String> = c.colonies.iter().map(|col| u.system(c.system).bodies[col.body as usize].name.clone()).collect();
-            kv(ui, "Colonies", names.join(", "));
-        }
         if !c.detected.is_empty() {
             kv(ui, "Has detected", c.detected.iter().map(|d| u.civs[*d as usize].name.clone()).collect::<Vec<_>>().join(", "));
         }
     });
+
+    space_programme(ui, u, c);
+    interfere(ui, u, ci, c, ctx, ui_state);
 
     let mut nations: Vec<_> = c.polities.iter().filter(|p| p.alive()).collect();
     if !nations.is_empty() {

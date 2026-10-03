@@ -211,23 +211,65 @@ fn spawn_showcase(
     let sun = Vec4::new(-0.55, 0.3, 0.8, 1.5);
     let (ac, astr) = atmosphere_look(&body).unwrap_or(([0.3, 0.55, 1.0], 0.8));
     let m = planet_mats.add(PlanetMaterial {
-        u: PlanetUniform { sun: Vec3::new(sun.x, sun.y, sun.z).normalize().extend(sun.w), sun_color: Vec4::ONE, atmo: Vec4::new(ac[0], ac[1], ac[2], astr), params: Vec4::new(0.0, 0.85, 0.0, 1.0) },
+        u: PlanetUniform {
+            sun: Vec3::new(sun.x, sun.y, sun.z).normalize().extend(sun.w),
+            sun_color: Vec4::new(1.0, 1.0, 1.0, 0.0047),
+            atmo: Vec4::new(ac[0], ac[1], ac[2], astr),
+            params: Vec4::new(0.0, 0.85, 0.0, 1.0),
+            look: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            center: Vec4::new(0.0, 0.0, 0.0, 6.371e6),
+            ..default()
+        },
         albedo,
         clouds,
-        lights,
+        lights: lights.clone(),
+        emission: lights.clone(),
+        ring: images.add(solid_image([0, 0, 0, 0], TextureFormat::Rgba8UnormSrgb)),
     });
-    let a = atmo_mats.add(AtmosphereMaterial { u: AtmosphereUniform { sun: Vec3::new(sun.x, sun.y, sun.z).normalize().extend(sun.w), color: Vec4::new(ac[0], ac[1], ac[2], astr) } });
+    let look = crate::render::look::Look::of(&body);
+    let o = crate::render::atmosphere_optics(&body, &look).unwrap_or(crate::render::Optics { top: 1.02, h: 0.0044, beta: [10.0, 23.0, 55.0], mie: 5.0, g: 0.76 });
+    let a = atmo_mats.add(AtmosphereMaterial {
+        u: AtmosphereUniform {
+            sun: Vec3::new(sun.x, sun.y, sun.z).normalize().extend(sun.w),
+            sun_color: Vec4::new(1.0, 1.0, 1.0, 0.0047),
+            center: Vec4::new(0.0, 0.0, 0.0, 6.371e6),
+            optics: Vec4::new(o.top, o.h, o.mie, o.g),
+            beta: Vec4::new(o.beta[0], o.beta[1], o.beta[2], 0.0),
+            ..default()
+        },
+    });
+    let top = o.top;
     commands
         .spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(m), Transform::from_scale(Vec3::splat(6.371e6)), MenuVisual))
         .with_children(|p| {
-            p.spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(a), Transform::from_scale(Vec3::splat(1.025))));
+            p.spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(a), Transform::from_scale(Vec3::splat(top))));
         });
 }
 
-fn place_showcase(view: Res<ViewInfo>, time: Res<Time>, mut q: Query<&mut Transform, With<MenuVisual>>) {
-    for mut tf in &mut q {
+fn place_showcase(
+    view: Res<ViewInfo>,
+    time: Res<Time>,
+    mut q: Query<(&mut Transform, &MeshMaterial3d<PlanetMaterial>, &Children), With<MenuVisual>>,
+    shells: Query<&MeshMaterial3d<AtmosphereMaterial>>,
+    mut planet_mats: ResMut<Assets<PlanetMaterial>>,
+    mut atmo_mats: ResMut<Assets<AtmosphereMaterial>>,
+) {
+    for (mut tf, m, children) in &mut q {
         tf.translation = (DVec3::ZERO - view.origin).as_vec3();
         tf.rotation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Quat::from_rotation_x(0.4) * Quat::from_rotation_z(time.elapsed_secs() * 0.02);
+        let center = tf.translation.extend(6.371e6);
+        let q = tf.rotation.inverse();
+        if let Some(mat) = planet_mats.get_mut(&m.0) {
+            mat.u.center = center;
+            mat.u.orient = Vec4::new(q.x, q.y, q.z, q.w);
+        }
+        for c in children.iter() {
+            if let Ok(s) = shells.get(c) {
+                if let Some(mat) = atmo_mats.get_mut(&s.0) {
+                    mat.u.center = center;
+                }
+            }
+        }
     }
 }
 

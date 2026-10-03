@@ -10,6 +10,7 @@
 //! (Bevy): +Y up. Mapping: render = (x, z, -y).
 
 pub mod bake;
+pub mod look;
 pub mod materials;
 pub mod overlays;
 mod sky;
@@ -30,7 +31,8 @@ use crate::persistence::UserSettings;
 use crate::sim::Sim;
 use crate::state::{AppState, Frame};
 use bake::BakedSurface;
-use materials::{AtmosphereMaterial, AtmosphereUniform, PlanetMaterial, PlanetUniform};
+use look::{Look, Style};
+use materials::{AtmosphereMaterial, AtmosphereUniform, PlanetMaterial, PlanetUniform, RingMaterial, RingUniform, StarMaterial, StarUniform};
 pub use sky::SkyHandle;
 
 pub fn to_render(v: Vec3d) -> DVec3 {
@@ -87,7 +89,13 @@ pub struct BodyVisual {
     pub level: u8,
     pub signature: u64,
     pub lights_baked_at: f64,
+    /// How the body looks (chosen once per appearance; rebuilt when it changes).
+    pub look: std::sync::Arc<Look>,
 }
+
+/// A body's ring system (child of the body).
+#[derive(Component)]
+pub struct RingVisual;
 
 #[derive(Component)]
 pub struct PendingBake {
@@ -104,7 +112,6 @@ pub struct AtmosphereShell(pub BodyRef);
 #[derive(Resource)]
 pub struct SharedMeshes {
     pub sphere: Handle<Mesh>,
-    pub sphere_low: Handle<Mesh>,
 }
 
 pub struct RenderPlugin;
@@ -114,11 +121,17 @@ impl Plugin for RenderPlugin {
         embedded_asset!(app, "shaders/planet.wgsl");
         embedded_asset!(app, "shaders/atmosphere.wgsl");
         embedded_asset!(app, "shaders/terrain.wgsl");
+        embedded_asset!(app, "shaders/common.wgsl");
+        embedded_asset!(app, "shaders/ring.wgsl");
+        embedded_asset!(app, "shaders/star.wgsl");
         app.add_plugins((
             MaterialPlugin::<PlanetMaterial>::default(),
             MaterialPlugin::<AtmosphereMaterial>::default(),
             MaterialPlugin::<materials::TerrainMaterial>::default(),
+            MaterialPlugin::<RingMaterial>::default(),
+            MaterialPlugin::<StarMaterial>::default(),
         ))
+            .add_systems(Startup, load_shader_library)
             .init_resource::<ViewInfo>()
             .init_resource::<terrain_lod::TerrainLod>()
             .init_resource::<SpawnedBodies>()
@@ -129,7 +142,7 @@ impl Plugin for RenderPlugin {
                 Update,
                 (
                     (sync_body_visuals, update_world_positions, terrain_lod::position_patches, terrain_lod::sink_base_sphere).chain().in_set(Frame::Positions),
-                    (terrain_lod::update_terrain_lod, apply_origin, update_planet_materials, request_bakes, finish_bakes, update_lights).chain().in_set(Frame::Apply),
+                    (terrain_lod::update_terrain_lod, apply_origin, update_planet_materials, update_star_materials, request_bakes, finish_bakes, update_lights).chain().in_set(Frame::Apply),
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             )
@@ -137,7 +150,7 @@ impl Plugin for RenderPlugin {
         // Created at build time: the initial state's OnEnter runs before Startup systems.
         let (s, t) = app.world().resource::<UserSettings>().graphics.sphere_segments();
         let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
-        let shared = SharedMeshes { sphere: meshes.add(Sphere::new(1.0).mesh().uv(s, t)), sphere_low: meshes.add(Sphere::new(1.0).mesh().uv(32, 16)) };
+        let shared = SharedMeshes { sphere: meshes.add(Sphere::new(1.0).mesh().uv(s, t)) };
         app.insert_resource(shared);
     }
 }
@@ -147,16 +160,57 @@ pub fn solid_image(rgba: [u8; 4], format: TextureFormat) -> Image {
     Image::new(Extent3d { width: 2, height: 2, depth_or_array_layers: 1 }, TextureDimension::D2, data, format, RenderAssetUsages::RENDER_WORLD)
 }
 
-fn image_from(data: Vec<u8>, w: u32, h: u32, format: TextureFormat) -> Image {
-    let mut img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, data, format, RenderAssetUsages::RENDER_WORLD);
+/// Upload a texture with a full mip chain (box-filtered on the CPU), so distant planets
+/// are smooth rather than shimmering.
+pub fn image_from(data: Vec<u8>, w: u32, h: u32, format: TextureFormat) -> Image {
+    let channels = if format == TextureFormat::R8Unorm { 1 } else { 4 };
+    let mut all = data.clone();
+    let (mut cw, mut ch) = (w as usize, h as usize);
+    let mut level = data;
+    let mut levels = 1;
+    while cw > 1 || ch > 1 {
+        let (nw, nh) = ((cw / 2).max(1), (ch / 2).max(1));
+        let mut next = vec![0u8; nw * nh * channels];
+        for y in 0..nh {
+            for x in 0..nw {
+                for c in 0..channels {
+                    let mut sum = 0u32;
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let sx = (x * 2 + dx).min(cw - 1);
+                        let sy = (y * 2 + dy).min(ch - 1);
+                        sum += level[(sy * cw + sx) * channels + c] as u32;
+                    }
+                    next[(y * nw + x) * channels + c] = ((sum + 2) / 4) as u8;
+                }
+            }
+        }
+        all.extend_from_slice(&next);
+        level = next;
+        cw = nw;
+        ch = nh;
+        levels += 1;
+    }
+    let mut img = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
+    img.texture_descriptor.mip_level_count = levels;
+    img.data = Some(all);
     img.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
         address_mode_u: bevy::image::ImageAddressMode::Repeat,
         mag_filter: bevy::image::ImageFilterMode::Linear,
         min_filter: bevy::image::ImageFilterMode::Linear,
         mipmap_filter: bevy::image::ImageFilterMode::Linear,
+        anisotropy_clamp: 8,
         ..default()
     });
     img
+}
+
+/// Keeps the shared WGSL library (`cosmogon::common`) loaded so shaders can import it.
+#[derive(Resource)]
+#[allow(dead_code)]
+struct ShaderLibrary(Handle<bevy::shader::Shader>);
+
+fn load_shader_library(mut commands: Commands, assets: Res<AssetServer>) {
+    commands.insert_resource(ShaderLibrary(assets.load("embedded://cosmogon/render/shaders/common.wgsl")));
 }
 
 pub fn atmosphere_look(body: &Body) -> Option<([f32; 3], f32)> {
@@ -228,6 +282,111 @@ fn appearance_key(body: &Body) -> u64 {
     h.finish()
 }
 
+/// Scattering properties of a body's atmosphere for the shell shader (distances in body
+/// radii). Vertical optical depths are physically motivated (Earth's Rayleigh depth is
+/// 0.24 in blue; Mars is dust-dominated; Venus and Titan are opaque); the scale height is
+/// exaggerated for visibility and the coefficients rescaled to keep those depths.
+pub struct Optics {
+    pub top: f32,
+    pub h: f32,
+    pub beta: [f32; 3],
+    pub mie: f32,
+    pub g: f32,
+}
+
+pub fn atmosphere_optics(body: &Body, look: &Look) -> Option<Optics> {
+    let a = &body.atmosphere;
+    let column = (a.pressure_bar / body.gravity_g().max(0.05)) as f32;
+    let (top, tau, mie, g): (f32, [f32; 3], f32, f32) = match &look.style {
+        Style::Giant(_) if body.kind == cosmogon_sim::astro::BodyKind::IceGiant => (1.03, [0.05, 0.14, 0.28], 0.15, 0.7),
+        Style::Giant(_) => (1.03, [0.07, 0.10, 0.16], 0.25, 0.7),
+        Style::CloudDeck { tint, .. } => (1.025, [tint[0] * 2.5, tint[1] * 2.5, tint[2] * 2.5], 2.0, 0.6),
+        Style::Haze { haze } => (1.12, [haze[0] * 1.8, haze[1] * 1.1, haze[2] * 0.5], 1.2, 0.65),
+        // Rock-vapour and thin remnant atmospheres over magma.
+        Style::Lava { .. } => (1.02, [0.04, 0.05, 0.08], 0.08, 0.7),
+        _ if a.pressure_bar < 0.003 => return None,
+        _ if a.pressure_bar < 0.05 && body.hydro.ocean_fraction <= 0.0 => {
+            // Thin and dusty (Mars): butterscotch by day, blue around the setting sun.
+            let dust = (column / 0.006).sqrt().min(3.0);
+            (1.02, [0.05 * dust, 0.032 * dust, 0.02 * dust], 0.07 * dust, 0.75)
+        }
+        _ => {
+            let co2 = (1.0 + 1.4 * a.co2) as f32;
+            let k = (column * co2).min(30.0);
+            (1.02, [0.045 * k, 0.10 * k, 0.24 * k], 0.08 * k.sqrt(), 0.76)
+        }
+    };
+    let h = (top - 1.0) * 0.22;
+    let cap = |x: f32| x.min(8.0) / h;
+    Some(Optics { top, h, beta: tau.map(cap), mie: cap(mie), g })
+}
+
+/// Saturn's main rings from measured radii and approximate optical depths (C, B, Cassini
+/// Division, A with the Encke and Keeler gaps, F), Uranus's narrow dark ringlets, or a
+/// procedural system. RGBA, `width`×1, alpha = opacity.
+fn bake_ring_profile(body: &Body) -> (Vec<u8>, u32) {
+    let Some(rings) = &body.rings else { return (vec![0; 4], 1) };
+    let width = 2048u32;
+    let (inner, outer) = (rings.inner / 1000.0, rings.outer / 1000.0);
+    let mut out = Vec::with_capacity(width as usize * 4);
+    for i in 0..width {
+        let r_km = inner + (outer - inner) * (i as f64 + 0.5) / width as f64;
+        let fine = cosmogon_sim::noise::fbm3(body.terrain_seed, [r_km / 300.0, 0.5, 0.5], 4, 2.3, 0.6) * 0.5 + 0.5;
+        let micro = cosmogon_sim::noise::fbm3(body.terrain_seed ^ 7, [r_km / 40.0, 0.5, 0.5], 3, 2.0, 0.5) * 0.5 + 0.5;
+        let (rgb, alpha): ([f32; 3], f64) = if body.real && body.name == "Saturn" {
+            let in_ = |a: f64, b: f64| r_km >= a && r_km < b;
+            if in_(74_658.0, 92_000.0) {
+                ([0.55, 0.50, 0.44], 0.08 + 0.10 * fine)
+            } else if in_(92_000.0, 117_580.0) {
+                let x = (r_km - 92_000.0) / 25_580.0;
+                ([0.80, 0.72, 0.60], (0.75 + 0.22 * (x * 3.0).min(1.0)) * (0.92 + 0.08 * fine))
+            } else if in_(117_580.0, 122_170.0) {
+                ([0.50, 0.47, 0.43], 0.06 + 0.06 * fine)
+            } else if in_(133_410.0, 133_740.0) || in_(136_485.0, 136_527.0) {
+                ([0.5, 0.5, 0.5], 0.01)
+            } else if in_(122_170.0, 136_775.0) {
+                ([0.72, 0.68, 0.62], 0.42 + 0.12 * fine)
+            } else if in_(140_130.0, 140_230.0) {
+                ([0.80, 0.78, 0.75], 0.45)
+            } else {
+                ([0.5, 0.5, 0.5], 0.0)
+            }
+        } else if body.real && body.name == "Uranus" {
+            // Nine narrow ringlets; ε (outermost) is the widest.
+            let ringlets = [41_837.0, 42_234.0, 42_570.0, 44_718.0, 45_661.0, 47_175.0, 47_627.0, 48_300.0, 51_149.0];
+            let a = ringlets.iter().enumerate().map(|(k, c)| {
+                let w = if k == 8 { 40.0 } else { 8.0 };
+                (-((r_km - c) / w).powi(2)).exp()
+            }).fold(0.0, f64::max);
+            ([0.32, 0.31, 0.30], a * 0.7)
+        } else {
+            let x = (i as f64 + 0.5) / width as f64;
+            let bands = fine;
+            let gap = if (0.62..0.66).contains(&x) { 0.1 } else { 1.0 };
+            let edge = (x * 12.0).min(1.0) * ((1.0 - x) * 20.0).min(1.0);
+            let c = bake::mix3(body.color, [0.95, 0.92, 0.85], bands as f32);
+            (c, bands * gap * edge * rings.opacity)
+        };
+        let a = (alpha * (0.85 + 0.3 * micro)).clamp(0.0, 1.0);
+        let c = rgb.map(|x| ((x * (0.9 + 0.2 * micro as f32)).clamp(0.0, 1.0) * 255.0) as u8);
+        out.extend_from_slice(&c);
+        out.push((a * 255.0) as u8);
+    }
+    (out, width)
+}
+
+fn ring_image(data: Vec<u8>, w: u32) -> Image {
+    let mut img = image_from(data, w, 1, TextureFormat::Rgba8UnormSrgb);
+    img.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+        address_mode_u: bevy::image::ImageAddressMode::ClampToEdge,
+        mag_filter: bevy::image::ImageFilterMode::Linear,
+        min_filter: bevy::image::ImageFilterMode::Linear,
+        mipmap_filter: bevy::image::ImageFilterMode::Linear,
+        ..default()
+    });
+    img
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_body(
     commands: &mut Commands,
@@ -235,43 +394,44 @@ fn spawn_body(
     body: &Body,
     shared: &SharedMeshes,
     meshes: &mut Assets<Mesh>,
-    std_mats: &mut Assets<StandardMaterial>,
+    ring_mats: &mut Assets<RingMaterial>,
     planet_mats: &mut Assets<PlanetMaterial>,
     atmo_mats: &mut Assets<AtmosphereMaterial>,
     images: &mut Assets<Image>,
 ) -> Entity {
+    let look = std::sync::Arc::new(Look::of(body));
     let black = images.add(solid_image([0, 0, 0, 0], TextureFormat::R8Unorm));
     let c = body.color;
     let albedo = images.add(solid_image([(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 0], TextureFormat::Rgba8UnormSrgb));
-    let mat = planet_mats.add(PlanetMaterial { u: PlanetUniform::default(), albedo, clouds: black.clone(), lights: black });
+    let (ring_data, ring_w) = bake_ring_profile(body);
+    let ring_tex = images.add(ring_image(ring_data, ring_w));
+    let mat = planet_mats.add(PlanetMaterial { u: PlanetUniform::default(), albedo, clouds: black.clone(), lights: black.clone(), emission: black, ring: ring_tex.clone() });
     let mut e = commands.spawn((
         Mesh3d(shared.sphere.clone()),
         MeshMaterial3d(mat),
         Transform::from_scale(Vec3::splat(body.radius as f32)),
+        // Hidden until positioned (otherwise it is drawn for a frame at the camera).
+        Visibility::Hidden,
         WorldPos::default(),
-        BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0 },
+        BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0, look: look.clone() },
         SimVisual,
     ));
     e.with_children(|p| {
-        if let Some((color, strength)) = atmosphere_look(body) {
-            let thickness = if body.kind.has_surface() { 1.025 } else { 1.04 };
-            let m = atmo_mats.add(AtmosphereMaterial { u: AtmosphereUniform { sun: Vec4::new(1.0, 0.0, 0.0, 1.0), color: Vec4::new(color[0], color[1], color[2], strength) } });
-            p.spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(m), Transform::from_scale(Vec3::splat(thickness)), AtmosphereShell(r)));
+        if let Some(o) = atmosphere_optics(body, &look) {
+            let m = atmo_mats.add(AtmosphereMaterial {
+                u: AtmosphereUniform {
+                    optics: Vec4::new(o.top, o.h, o.mie, o.g),
+                    beta: Vec4::new(o.beta[0], o.beta[1], o.beta[2], 0.0),
+                    ..default()
+                },
+            });
+            p.spawn((Mesh3d(shared.sphere.clone()), MeshMaterial3d(m), Transform::from_scale(Vec3::splat(o.top)), AtmosphereShell(r)));
         }
         if let Some(rings) = &body.rings {
-            let tex = bake::bake_rings(body.terrain_seed, rings.opacity, body.color);
-            let img = images.add(image_from(tex, 256, 1, TextureFormat::Rgba8UnormSrgb));
-            let ring = meshes.add(ring_mesh((rings.inner / body.radius) as f32, (rings.outer / body.radius) as f32));
-            let m = std_mats.add(StandardMaterial {
-                base_color_texture: Some(img),
-                base_color: Color::srgb(0.75, 0.72, 0.66),
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            });
-            p.spawn((Mesh3d(ring), MeshMaterial3d(m), Transform::default()));
+            let (inner, outer) = ((rings.inner / body.radius) as f32, (rings.outer / body.radius) as f32);
+            let ring = meshes.add(ring_mesh(inner, outer));
+            let m = ring_mats.add(RingMaterial { u: RingUniform { extent: Vec4::new(inner, outer, 0.0, 0.0), ..default() }, texture: ring_tex });
+            p.spawn((Mesh3d(ring), MeshMaterial3d(m), Transform::default(), RingVisual));
         }
     });
     e.id()
@@ -285,7 +445,7 @@ fn sync_body_visuals(
     shared: Res<SharedMeshes>,
     mut spawned: ResMut<SpawnedBodies>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut std_mats: ResMut<Assets<StandardMaterial>>,
+    mut ring_mats: ResMut<Assets<RingMaterial>>,
     mut planet_mats: ResMut<Assets<PlanetMaterial>>,
     mut atmo_mats: ResMut<Assets<AtmosphereMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -304,7 +464,7 @@ fn sync_body_visuals(
                 None => {}
             }
             if body.exists() {
-                let e = spawn_body(&mut commands, r, body, &shared, &mut meshes, &mut std_mats, &mut planet_mats, &mut atmo_mats, &mut images);
+                let e = spawn_body(&mut commands, r, body, &shared, &mut meshes, &mut ring_mats, &mut planet_mats, &mut atmo_mats, &mut images);
                 spawned.0.insert(r, (e, key));
             }
         }
@@ -322,7 +482,7 @@ fn spawn_universe(
     mut commands: Commands,
     sim: Res<Sim>,
     shared: Res<SharedMeshes>,
-    mut std_mats: ResMut<Assets<StandardMaterial>>,
+    mut star_mats: ResMut<Assets<StarMaterial>>,
     mut spawned: ResMut<SpawnedBodies>,
 ) {
     let u = &sim.universe;
@@ -331,12 +491,9 @@ fn spawn_universe(
     for sys in &u.systems {
         let stars = std::iter::once((&sys.star, false)).chain(sys.companion.as_ref().map(|c| (&c.star, true)));
         for (star, companion) in stars {
-            let c = star.color(t);
-            let lum = (star.luminosity(t).max(1e-4)).powf(0.15) as f32;
-            let k = 60.0 * lum;
-            let mat = std_mats.add(StandardMaterial { base_color: Color::LinearRgba(LinearRgba::new(c[0] * k, c[1] * k, c[2] * k, 1.0)), unlit: true, ..default() });
+            let mat = star_mats.add(StarMaterial { u: star_uniform(star, t, sys.id as f32 * 7.3 + companion as u8 as f32) });
             commands.spawn((
-                Mesh3d(shared.sphere_low.clone()),
+                Mesh3d(shared.sphere.clone()),
                 MeshMaterial3d(mat),
                 Transform::default(),
                 WorldPos::default(),
@@ -349,12 +506,50 @@ fn spawn_universe(
     info!("spawned visuals for {} systems", u.systems.len());
 }
 
+/// Photosphere parameters: colour from temperature, limb darkening (stronger for cooler
+/// stars, ~0.6 for the Sun in visible light), and spot coverage rising for cool, active stars.
+fn star_uniform(star: &cosmogon_sim::astro::Star, t: f64, seed: f32) -> StarUniform {
+    let c = star.color(t);
+    let lum = (star.luminosity(t).max(1e-4)).powf(0.15) as f32;
+    let k = 60.0 * lum;
+    let teff = star.temperature_at(t);
+    let limb = (0.85 - (teff as f32 - 3500.0) / 12000.0).clamp(0.35, 0.85);
+    let spots = ((6200.0 - teff as f32) / 3000.0).clamp(0.0, 0.9) * 0.6 + 0.1 * star.flare_activity_at(t) as f32;
+    StarUniform { color: Vec4::new(c[0] * k, c[1] * k, c[2] * k, 1.0), params: Vec4::new(0.0, spots, limb, seed), center: Vec4::ZERO }
+}
+
+fn update_star_materials(sim: Res<Sim>, time: Res<Time>, view: Res<ViewInfo>, q: Query<(&StarVisual, &WorldPos, &MeshMaterial3d<StarMaterial>)>, mut mats: ResMut<Assets<StarMaterial>>) {
+    let u = &sim.universe;
+    for (s, wp, m) in &q {
+        if let Some(mat) = mats.get_mut(&m.0) {
+            let sys = u.system(s.system);
+            let star = if s.companion { sys.companion.as_ref().map(|c| &c.star).unwrap_or(&sys.star) } else { &sys.star };
+            let seed = mat.u.params.w;
+            mat.u = star_uniform(star, u.time, seed);
+            // A point of light needs to be very bright for the glare; a resolved disc is
+            // dimmed towards the display range so limb darkening and granulation show.
+            let px = view.screen_radius(wp.0, s.radius);
+            let k = 1.0 - ((px - 4.0) / 120.0).clamp(0.0, 1.0) * 0.93;
+            mat.u.color = (mat.u.color.truncate() * k).extend(1.0);
+            mat.u.params.x = (time.elapsed_secs_f64() % 100_000.0) as f32;
+        }
+    }
+}
+
 fn despawn_universe(mut commands: Commands, q: Query<Entity, With<SimVisual>>, mut lod: ResMut<terrain_lod::TerrainLod>, mut spawned: ResMut<SpawnedBodies>) {
     spawned.0.clear();
     *lod = terrain_lod::TerrainLod::default();
     for e in &q {
         commands.entity(e).despawn();
     }
+}
+
+/// Where a civilization's colony stands on a world (deterministic; lat, lon in radians):
+/// low latitudes, away from the poles.
+pub fn colony_site(civ: u32, body: u32) -> (f64, f64) {
+    let h = cosmogon_sim::rng::mix(civ as u64 * 0x9E37 + 1, body as u64);
+    let f = |s: u32| ((h >> s) & 0xFFFF) as f64 / 65535.0;
+    ((f(0) - 0.5) * 0.9, f(16) * std::f64::consts::TAU)
 }
 
 /// Orientation of a body: axial tilt and spin (tidally locked bodies face their primary).
@@ -409,19 +604,46 @@ fn sun_intensity(flux_rel_earth: f64) -> f32 {
     (flux_rel_earth.max(1e-6).powf(0.28) as f32 * 1.6).clamp(0.15, 5.0)
 }
 
+/// Up to four bodies that can cast shadows on body `i` (its parent, siblings and moons),
+/// as offsets / radius relative to it, preferring the ones looking biggest towards the star.
+fn occluders(sys: &cosmogon_sim::astro::StarSystem, i: usize, t: f64, to_star: DVec3) -> [Vec4; 4] {
+    let body = &sys.bodies[i];
+    let center = to_render(sys.body_position(i, t));
+    let l = to_star.normalize();
+    let mut cands: Vec<(f64, Vec4)> = sys
+        .bodies
+        .iter()
+        .enumerate()
+        .filter(|(j, o)| *j != i && o.exists() && (o.parent == Some(i as u32) || body.parent == Some(*j as u32) || (body.parent.is_some() && o.parent == body.parent)))
+        .filter_map(|(j, o)| {
+            let off = to_render(sys.body_position(j, t)) - center;
+            let along = off.dot(l);
+            (along > 0.0).then(|| (o.radius / along.max(1.0), (off / body.radius).as_vec3().extend((o.radius / body.radius) as f32)))
+        })
+        .collect();
+    cands.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut out = [Vec4::ZERO; 4];
+    for (k, c) in cands.into_iter().take(4).enumerate() {
+        out[k] = c.1;
+    }
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_planet_materials(
     sim: Res<Sim>,
     view: Res<ViewInfo>,
-    bodies: Query<(&BodyVisual, &WorldPos, &MeshMaterial3d<PlanetMaterial>, Option<&Children>)>,
+    bodies: Query<(&BodyVisual, &WorldPos, &Transform, &MeshMaterial3d<PlanetMaterial>, Option<&Children>)>,
     shells: Query<&MeshMaterial3d<AtmosphereMaterial>>,
+    rings: Query<&MeshMaterial3d<RingMaterial>>,
     stars: Query<(&StarVisual, &WorldPos)>,
     mut planet_mats: ResMut<Assets<PlanetMaterial>>,
     mut atmo_mats: ResMut<Assets<AtmosphereMaterial>>,
+    mut ring_mats: ResMut<Assets<RingMaterial>>,
 ) {
     let u = &sim.universe;
     let t = u.time;
-    for (b, wp, mat, children) in &bodies {
+    for (b, wp, tf, mat, children) in &bodies {
         // Only bodies that are actually resolved on screen need fresh lighting.
         if view.screen_radius(wp.0, b.radius) < 0.35 {
             continue;
@@ -433,21 +655,66 @@ fn update_planet_materials(
         let flux = sys.star.luminosity(t) / (dist / cosmogon_sim::astro::AU).powi(2);
         let sun = to_star.normalize().as_vec3().extend(sun_intensity(flux));
         let c = sys.star.color(t);
+        let sun_color = Vec4::new(c[0], c[1], c[2], (sys.star.current_radius(t) / dist.max(1.0)) as f32);
         let body = u.body(b.r);
         let civ = u.civ_on(b.r);
-        let lights = civ.map(|c| if c.flags.contains("electric_light") { 4.0 } else { 1.2 }).unwrap_or(0.0);
+        let colony = u.civs.iter().any(|c| c.is_alive() && c.system == b.r.system && c.colonies.iter().any(|col| col.body == b.r.body));
+        let lights = civ.map(|c| if c.flags.contains("electric_light") { 4.0 } else { 1.2 }).unwrap_or(if colony { 4.0 } else { 0.0 });
         let atmo = atmosphere_look(body);
+        let center = (wp.0 - view.origin).as_vec3().extend(b.radius as f32);
+        let occ = occluders(sys, b.r.body as usize, t, to_star);
+        let look = &b.look;
+        let style = match look.style {
+            Style::Giant(_) => 1.0,
+            Style::CloudDeck { .. } | Style::Haze { .. } => 2.0,
+            _ => 0.0,
+        };
+        let emission_strength = match look.style {
+            Style::Lava { .. } => 1.0,
+            Style::Volcanic => 1.5,
+            Style::Giant(_) => 1.5 * look.night_glow,
+            _ => 0.0,
+        };
+        let ring_normal = (tf.rotation * Vec3::Z).extend(0.0);
+        let (ring, ring_extent) = match &body.rings {
+            Some(r) => {
+                let (i, o) = ((r.inner / body.radius) as f32, (r.outer / body.radius) as f32);
+                (Vec4::new(i, o, r.opacity as f32, 1.0), Vec4::new(i, o, 0.0, 0.0))
+            }
+            None => (Vec4::ZERO, Vec4::ZERO),
+        };
+        let q = tf.rotation.inverse();
         if let Some(m) = planet_mats.get_mut(&mat.0) {
             m.u.sun = sun;
-            m.u.sun_color = Vec4::new(c[0], c[1], c[2], 1.0);
+            m.u.sun_color = sun_color;
             m.u.atmo = atmo.map(|(c, s)| Vec4::new(c[0], c[1], c[2], s)).unwrap_or(Vec4::ZERO);
             let cloud_drift = (t / (86_400.0 * 9.0)).rem_euclid(1.0) as f32;
             m.u.params = Vec4::new(cloud_drift, 0.85, lights, if body.hydro.ocean_fraction > 0.0 { 1.0 } else { 0.0 });
+            m.u.emission = Vec4::new(look.emission[0], look.emission[1], look.emission[2], emission_strength);
+            let flow = ((t / 86_400.0 * 0.05).rem_euclid(5000.0)) as f32;
+            m.u.look = Vec4::new(style, 1.0, flow, (body.terrain_seed % 1000) as f32);
+            m.u.center = center;
+            m.u.ring = ring;
+            m.u.ring_normal = ring_normal;
+            m.u.orient = Vec4::new(q.x, q.y, q.z, q.w);
+            m.u.occluders = occ;
         }
         for child in children.into_iter().flat_map(|c| c.iter()) {
             if let Ok(shell) = shells.get(child) {
                 if let Some(m) = atmo_mats.get_mut(&shell.0) {
                     m.u.sun = sun;
+                    m.u.sun_color = sun_color;
+                    m.u.center = center;
+                    m.u.occluders = occ;
+                }
+            }
+            if let Ok(rm) = rings.get(child) {
+                if let Some(m) = ring_mats.get_mut(&rm.0) {
+                    m.u.sun = sun;
+                    m.u.sun_color = sun_color;
+                    m.u.center = center;
+                    m.u.normal = ring_normal;
+                    m.u.extent = ring_extent;
                 }
             }
         }
@@ -513,6 +780,7 @@ fn finish_bakes(
             if let Some(m) = planet_mats.get_mut(&mat.0) {
                 m.albedo = images.add(image_from(baked.albedo, baked.width, baked.height, TextureFormat::Rgba8UnormSrgb));
                 m.clouds = images.add(image_from(baked.clouds, baked.width, baked.height, TextureFormat::R8Unorm));
+                m.emission = images.add(image_from(baked.emission, baked.width, baked.height, TextureFormat::R8Unorm));
             }
             b.level = p.level;
             b.signature = p.signature;
@@ -531,13 +799,27 @@ fn update_lights(
 ) {
     let now = time.elapsed_secs_f64();
     for (mut b, wp, mat) in &mut q {
-        let Some(civ) = sim.universe.civ_on(b.r) else { continue };
+        let u = &sim.universe;
+        let civ = u.civ_on(b.r);
+        let outposts: Vec<(f64, f64, f64)> = u
+            .civs
+            .iter()
+            .filter(|c| c.is_alive() && c.system == b.r.system)
+            .flat_map(|c| c.colonies.iter().filter(|col| col.body == b.r.body).map(move |col| (c.id, col)))
+            .map(|(id, col)| {
+                let (lat, lon) = colony_site(id, col.body);
+                (lat, lon, col.population)
+            })
+            .collect();
+        if civ.is_none() && outposts.is_empty() {
+            continue;
+        }
         if now - b.lights_baked_at < 1.5 || view.screen_radius(wp.0, b.radius) < 2.0 {
             continue;
         }
         b.lights_baked_at = now;
         let w = 2048;
-        let data = bake::bake_lights(civ, w);
+        let data = bake::bake_lights_with(civ, &outposts, w);
         if let Some(m) = planet_mats.get_mut(&mat.0) {
             m.lights = images.add(image_from(data, w, w / 2, TextureFormat::R8Unorm));
         }

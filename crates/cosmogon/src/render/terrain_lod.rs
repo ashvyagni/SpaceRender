@@ -19,7 +19,7 @@ use cosmogon_sim::noise::{fbm3, ridged3};
 use cosmogon_sim::planet::terrain::{SurfaceContext, METRES_PER_UNIT};
 use cosmogon_sim::BodyRef;
 
-use super::bake::surface_color;
+use super::look::Look;
 use super::materials::{PlanetMaterial, TerrainMaterial};
 use super::{body_rotation, to_render, BodyVisual, ViewInfo, WorldPos};
 use crate::camera::CameraRig;
@@ -30,7 +30,7 @@ use crate::sim::{Sim, Target};
 const N: usize = 33;
 const MAX_LEVEL: u8 = 17;
 /// Activate when the focused world is at least this many pixels in radius.
-const ACTIVATE_PX: f32 = 280.0;
+const ACTIVATE_PX: f32 = 750.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NodeKey {
@@ -88,12 +88,40 @@ pub struct SurfaceModel {
     pub ctx: SurfaceContext,
     pub metres_per_unit: f64,
     pub has_ocean: bool,
+    pub look: Look,
+    /// Built-up areas and farmland of the civilization living here.
+    pub towns: Vec<Town>,
+}
+
+/// A settlement as seen from the ground: urban core and surrounding farmland.
+#[derive(Clone, Debug)]
+pub struct Town {
+    pub dir: [f64; 3],
+    /// Angular radius (rad) of the built-up area and of the farmland around it.
+    pub urban: f64,
+    pub farm: f64,
+}
+
+impl Town {
+    /// Towns of a civilization, sized from population (a megacity of 30 million spans
+    /// ~30 km; farmland reaches a few times further if the civilization farms).
+    pub fn of(civ: &cosmogon_sim::civ::Civilization, radius: f64) -> Vec<Town> {
+        let farming = civ.knows("agriculture");
+        civ.sites
+            .iter()
+            .filter(|s| s.active() && s.population > 500.0)
+            .map(|s| {
+                let km = 0.3 + 5.5 * (s.population / 1e6).sqrt();
+                Town { dir: s.dir(), urban: km * 1000.0 / radius, farm: if farming { (km * 2.5 + 25.0) * 1000.0 / radius } else { 0.0 } }
+            })
+            .collect()
+    }
 }
 
 impl SurfaceModel {
     pub fn new(body: &Body, vegetated: bool) -> Self {
         let mpu = if body.elevation_data.is_some() { METRES_PER_UNIT } else { METRES_PER_UNIT * (1.0 / body.gravity_g().max(0.05)).sqrt().min(4.0) };
-        Self { body: body.clone(), ctx: SurfaceContext::new(body, vegetated), metres_per_unit: mpu, has_ocean: body.hydro.ocean_fraction > 0.0 }
+        Self { body: body.clone(), ctx: SurfaceContext::new(body, vegetated), metres_per_unit: mpu, has_ocean: body.hydro.ocean_fraction > 0.0, look: Look::of(body), towns: Vec::new() }
     }
 
     /// Close-up detail (terrain units): regional hills, ridged ranges in high country,
@@ -106,7 +134,7 @@ impl SurfaceModel {
         let hills = fbm3(seed ^ 0xD1, p(300.0), 7, 2.05, 0.5) * 0.10;
         let ranges = ridged3(seed ^ 0xD3, p(900.0), 5) * 0.12 * height.clamp(0.0, 1.0);
         let fine = fbm3(seed ^ 0xD2, p(30_000.0), 5, 2.1, 0.5) * 0.006;
-        let mut h = (hills + fine) * rough + ranges;
+        let mut h = (hills + fine) * rough + ranges + self.look.relief(seed, d);
         if !self.body.atmosphere.is_present() || self.body.atmosphere.pressure_bar < 0.01 {
             for (k, freq, depth) in [(0u64, 40.0, 0.25), (1, 160.0, 0.08), (2, 700.0, 0.025)] {
                 h += crater_field(seed ^ (0xC7A7 + k), d, freq) * depth;
@@ -119,11 +147,57 @@ impl SurfaceModel {
     pub fn sample(&self, d: [f64; 3]) -> (f64, [f32; 4]) {
         let s = self.ctx.sample(d);
         let h = s.height + self.detail(d, s.height);
-        let water = self.has_ocean && h < 0.0;
-        let r = self.body.radius + if water { 0.0 } else { h * self.metres_per_unit };
-        let (rgb, _) = surface_color(self.body.kind, &self.ctx, self.body.color, self.body.terrain_seed, d);
+        let ground = self.look.ground(&self.body, &self.ctx, d);
+        let water = (self.has_ocean && h < 0.0) || (ground.water && !self.has_ocean);
+        let r = self.body.radius + if self.has_ocean && h < 0.0 { 0.0 } else { h * self.metres_per_unit };
+        let mut rgb = ground.rgb;
+        if !water && !self.towns.is_empty() {
+            rgb = self.settled(d, rgb);
+        }
         let lin = rgb.map(|c| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) });
         (r, [lin[0], lin[1], lin[2], if water { 1.0 } else { 0.0 }])
+    }
+
+    /// Colour of built-up land and fields, blended over the natural ground.
+    fn settled(&self, d: [f64; 3], natural: [f32; 3]) -> [f32; 3] {
+        let (mut urban, mut farm) = (0.0f64, 0.0f64);
+        for t in &self.towns {
+            let c = d[0] * t.dir[0] + d[1] * t.dir[1] + d[2] * t.dir[2];
+            if c < 0.99 {
+                continue;
+            }
+            let ang = (2.0 * (1.0 - c)).max(0.0).sqrt();
+            urban = urban.max((-(ang / t.urban).powi(2) * 1.5).exp());
+            if t.farm > 0.0 {
+                farm = farm.max(1.0 - (ang / t.farm).powi(2)).max(0.0);
+            }
+        }
+        if urban < 0.02 && farm <= 0.0 {
+            return natural;
+        }
+        let seed = self.body.terrain_seed;
+        let r = self.body.radius;
+        let mut c = natural;
+        if farm > 0.0 {
+            // Patchwork of fields ~1 km across, only where land is gentle and green.
+            let cell = |k: f64| [(d[0] * r / k).floor(), (d[1] * r / k).floor(), (d[2] * r / k).floor()];
+            let f = cell(900.0);
+            let h = cosmogon_sim::rng::mix(cosmogon_sim::rng::mix(cosmogon_sim::rng::mix(seed, f[0] as i64 as u64), f[1] as i64 as u64), f[2] as i64 as u64);
+            let crops = [[0.56, 0.55, 0.30], [0.38, 0.48, 0.22], [0.64, 0.57, 0.40], [0.45, 0.42, 0.28]];
+            let crop = crops[(h % 4) as usize];
+            let green = (natural[1] - natural[2]).max(0.0) * 6.0;
+            let k = farm as f32 * 0.65 * green.min(1.0) * if h % 7 == 0 { 0.2 } else { 1.0 };
+            c = super::bake::mix3(c, crop, k);
+        }
+        if urban > 0.02 {
+            // Street blocks (~250 m) and a darker, denser core.
+            let g = |k: f64| ((d[0] * r / k).sin() * (d[1] * r / k).sin() * (d[2] * r / k + 1.3).sin()).abs();
+            let blocks = (g(250.0) * 1.6).min(1.0) as f32;
+            let city = super::bake::mix3([0.50, 0.48, 0.46], [0.36, 0.35, 0.34], urban as f32);
+            let city = [city[0] * (0.82 + 0.25 * blocks), city[1] * (0.82 + 0.25 * blocks), city[2] * (0.82 + 0.25 * blocks)];
+            c = super::bake::mix3(c, city, (urban * 1.3).min(0.92) as f32);
+        }
+        c
     }
 
     pub fn ground_radius(&self, d: [f64; 3]) -> f64 {
@@ -329,7 +403,11 @@ pub fn update_terrain_lod(
     let candidate = match rig.focus {
         Some(Target::Body(r)) if u.systems.get(r.system as usize).and_then(|s| s.bodies.get(r.body as usize)).is_some_and(|b| b.exists() && b.kind.has_surface()) => {
             let pos = to_render(u.body_position(r, t));
-            (view.screen_radius(pos, u.body(r).radius) > ACTIVATE_PX).then_some(r)
+            let b = u.body(r);
+            // Under an opaque sky the ground is only seen from below the cloud tops.
+            let look = Look::of(b);
+            let below_clouds = !look.opaque_atmosphere() || (view.origin - pos).length() - b.radius < look.cloud_top(b);
+            (view.screen_radius(pos, b.radius) > ACTIVATE_PX && below_clouds).then_some(r)
         }
         _ => None,
     };
@@ -352,14 +430,20 @@ pub fn update_terrain_lod(
 
     // Surface model; rebuilt (and patches regenerated) when the world itself changes.
     let veg = u.biosphere(r).is_some_and(|b| b.vegetated());
-    let sig = (body.radius.to_bits().rotate_left(24)) ^ ((body.hydro.ocean_fraction * 40.0) as u64) ^ (((body.hydro.ice_fraction * 40.0) as u64) << 8) ^ ((body.temperature * 0.2) as u64) << 16 ^ (veg as u64) << 40;
+    // Cities change the ground too (bucketed so growth repaints occasionally, not constantly).
+    let towns_sig = u.civ_on(r).map(|c| c.sites.iter().filter(|s| s.active()).map(|s| (s.population.max(1.0).log10() * 4.0) as u64).sum::<u64>()).unwrap_or(0);
+    let sig = towns_sig.rotate_left(48) ^ (body.radius.to_bits().rotate_left(24)) ^ ((body.hydro.ocean_fraction * 40.0) as u64) ^ (((body.hydro.ice_fraction * 40.0) as u64) << 8) ^ ((body.temperature * 0.2) as u64) << 16 ^ (veg as u64) << 40;
     if lod.model.is_none() || lod.model_signature != sig {
         for (_, state) in lod.nodes.drain() {
             if let NodeState::Ready(e) = state {
                 commands.entity(e).despawn();
             }
         }
-        lod.model = Some(std::sync::Arc::new(SurfaceModel::new(body, veg)));
+        let mut model = SurfaceModel::new(body, veg);
+        if let Some(civ) = u.civ_on(r) {
+            model.towns = Town::of(civ, body.radius);
+        }
+        lod.model = Some(std::sync::Arc::new(model));
         lod.model_signature = sig;
     }
     // Terrain material mirrors the planet material's uniforms and textures.
@@ -370,10 +454,12 @@ pub fn update_terrain_lod(
                 m.u = planet_mat.u;
                 m.clouds = planet_mat.clouds.clone();
                 m.lights = planet_mat.lights.clone();
+                m.emission = planet_mat.emission.clone();
+                m.ring = planet_mat.ring.clone();
             }
         }
         None => {
-            lod.material = Some(terrain_mats.add(TerrainMaterial { u: planet_mat.u, clouds: planet_mat.clouds.clone(), lights: planet_mat.lights.clone() }));
+            lod.material = Some(terrain_mats.add(TerrainMaterial { u: planet_mat.u, clouds: planet_mat.clouds.clone(), lights: planet_mat.lights.clone(), emission: planet_mat.emission.clone(), ring: planet_mat.ring.clone() }));
         }
     }
 
@@ -438,7 +524,8 @@ pub fn update_terrain_lod(
                     .spawn((
                         Mesh3d(meshes.add(patch.mesh)),
                         MeshMaterial3d(material.clone()),
-                        Transform::default(),
+                        // Placed correctly from the first frame it is drawn.
+                        Transform::from_translation((center + rot * patch.center - view.origin).as_vec3()).with_rotation(rot.as_quat()),
                         WorldPos(center + rot * patch.center),
                         TerrainPatch { body: r, key: k, center_local: patch.center },
                         super::SimVisual,
@@ -481,5 +568,31 @@ pub fn sink_base_sphere(lod: Res<TerrainLod>, mut q: Query<(&BodyVisual, &mut Tr
     for (b, mut tf) in &mut q {
         let k = if lod.body == Some(b.r) && lod.visible_patches > 0 { 0.996 } else { 1.0 };
         tf.scale = Vec3::splat((b.radius * k) as f32);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmogon_sim::astro::sol;
+
+    #[test]
+    fn patches_stay_on_the_surface() {
+        let sys = sol::sol_system();
+        for name in ["Mercury", "Io", "Earth", "Europa", "Callisto"] {
+            let body = &sys.bodies[sys.find_body(name).unwrap()];
+            let model = SurfaceModel::new(body, false);
+            for face in 0..6u8 {
+                for level in [0u8, 2, 5] {
+                    let key = NodeKey { face, level, x: (1 << level) / 3, y: (1 << level) / 2 };
+                    let p = build_patch(&model, key);
+                    let pos = p.mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+                    for v in pos {
+                        let r = (DVec3::from_array(v.map(|x| x as f64)) + p.center).length();
+                        assert!((r - body.radius).abs() < body.radius * 0.08, "{name} face {face} level {level}: r/R = {}", r / body.radius);
+                    }
+                }
+            }
+        }
     }
 }

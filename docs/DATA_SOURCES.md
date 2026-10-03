@@ -54,3 +54,18 @@ m³ s⁻², R☉ = 6.957 × 10⁸ m, L☉ = 3.828 × 10²⁶ W), CODATA 2018 G =
 
 For each new source this file must record: provider, dataset, license, retrieval method,
 update method, fields imported, uncertainty handling and attribution requirements.
+
+
+## Present-day humanity (0.5)
+
+| Data | Source | Notes |
+|---|---|---|
+| Major urban agglomerations, ~2025 (`cosmogon_sim/data/cities_2025.toml`) | UN World Urbanization Prospects 2018 (2025 projections), national statistics | Estimates, rounded; definitions of "urban area" differ by tens of percent |
+| Population 8.23 bn, 58 % urban | UN World Population Prospects 2024 | Interpolated to 1 Jan 2026 |
+| Primary energy ≈ 19.5 TW, ~80 % fossil | Energy Institute Statistical Review of World Energy 2024 | |
+| ~11 000 active satellites | Public satellite catalogues, 2025 | Order of magnitude |
+| Exploration record and missions in flight | NASA, ESA, Roscosmos/JAXA mission pages | Dates rounded to ~0.05 yr |
+| Remaining fossil fuel (~a century at current use) | BGR Energy Study (reserves + resources) | Model units, approximate |
+
+All are labelled ESTIMATED in the app. Countries are seeded from the city list (each city's
+country and capital) and are kept static by the model.

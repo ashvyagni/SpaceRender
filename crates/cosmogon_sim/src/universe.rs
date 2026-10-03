@@ -259,7 +259,12 @@ impl Universe {
         match settings.scenario {
             Scenario::GardenWorld => u.seed_garden_world(),
             Scenario::Sol => u.seed_humanity(),
-            Scenario::SolarSystemLab => u.seed_present_earth(),
+            Scenario::SolarSystemLab => {
+                u.seed_present_earth();
+                if settings.systems.civilization {
+                    u.seed_present_humanity();
+                }
+            }
             Scenario::Neighbourhood | Scenario::StarSystem | Scenario::EmptySystem => {}
         }
 
@@ -437,7 +442,7 @@ impl Universe {
         SurfaceContext::new(self.body(r), vegetated)
     }
 
-    fn make_civ(&mut self, r: BodyRef, species: Species, t: f64) -> Civilization {
+    pub(crate) fn make_civ(&mut self, r: BodyRef, species: Species, t: f64) -> Civilization {
         let id = self.civs.len() as u32;
         let surface = self.surface_context(r);
         let moons = self.systems[r.system as usize].moons_of(r.body as usize).count();
@@ -665,17 +670,12 @@ impl Universe {
             }
             let sys = &self.systems[s];
             let moons = sys.moons_of(b).count();
-            let colony_targets: Vec<(u32, f64)> = sys
-                .bodies
-                .iter()
-                .enumerate()
-                .filter(|(i, x)| *i != b && x.kind.has_surface() && x.mass > 1e21)
-                .map(|(i, x)| (i as u32, 1.0 / (1.0 + (x.gravity_g() - 0.7).abs()) * (-((x.temperature - 250.0) / 120.0).powi(2)).dexp()))
-                .collect();
+            let destinations = destinations_from(sys, b, t);
+            let colonisable = destinations.iter().filter(|d| d.colony > 0.0).count();
             let world = WorldView {
-                env: environment_for(&sys.bodies[b], moons, colony_targets.len(), t),
+                env: environment_for(&sys.bodies[b], moons, colonisable, t),
                 surface: self.surface_context(r),
-                colony_targets,
+                destinations,
                 params: &self.params,
                 tech_rate: self.settings.tech_rate,
             };
@@ -773,6 +773,32 @@ impl Universe {
             }
         }
     }
+}
+
+/// The other worlds of a system as destinations for a civilization on body `home`.
+pub fn destinations_from(sys: &StarSystem, home: usize, t: f64) -> Vec<crate::civ::space::Destination> {
+    use crate::civ::space::{hohmann_time, Destination};
+    let top_home = sys.top_level(home);
+    let a_home = (sys.body_local_position(top_home, t) - sys.star_local_position(t)).length();
+    sys.bodies
+        .iter()
+        .enumerate()
+        .filter(|(j, x)| *j != home && x.exists())
+        .map(|(j, x)| {
+            let top = sys.top_level(j);
+            let transfer = if top == top_home {
+                // Within the home planet's family: from low orbit out to the moon's orbit.
+                let planet = &sys.bodies[top_home];
+                let r2 = if j == top_home { planet.radius * 1.05 } else { x.orbit.a };
+                hohmann_time(planet.radius * 1.05, r2, planet.mu()).max(86_400.0)
+            } else {
+                let a = (sys.body_local_position(top, t) - sys.star_local_position(t)).length();
+                hohmann_time(a_home, a, sys.star.mu())
+            };
+            let colony = if x.kind.has_surface() && x.mass > 1e21 { 1.0 / (1.0 + (x.gravity_g() - 0.7).abs()) * (-((x.temperature - 250.0) / 120.0).powi(2)).dexp() } else { 0.0 };
+            Destination { body: j as u32, name: x.name.clone(), transfer, surface: x.kind.has_surface(), home_moon: x.parent == Some(home as u32), colony }
+        })
+        .collect()
 }
 
 fn life_event(e: &LifeEvent, body: &str, t: f64, s: u32, b: u32) -> Option<Event> {

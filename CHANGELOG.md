@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0 — Worlds and civilizations you can see (2026-10-04)
+Details: docs/MILESTONE_G1_C1.md.
+### Added
+* **Appearance model**: every planet, moon and exoplanet gets a physically chosen style (cratered,
+  volcanic, ice shell, grooved ice, tiger stripes, haze, cloud deck, lava/magma ocean, Sudarsky-class
+  giants with belts, jets and storms); Jupiter's GRS and ovals, Saturn's hexagon, Neptune's dark vortex.
+* **Rendering**: atmospheric single scattering, eclipse shadows from moons and planets, ring shadows,
+  Saturn's measured ring structure, stellar limb darkening/granulation/spots, lava and thermal glow,
+  procedural detail and bump mapping beyond texture resolution, mip-maps.
+* **Present-day humanity** in the Solar System Lab: real cities and countries, exploration record,
+  missions in flight (BepiColombo, Europa Clipper, JUICE), 11 000 satellites.
+* **Space programmes**: missions to every world (flyby → orbiter → lander → crewed), colony ships,
+  energy transition away from fossil fuels; Kardashev rating.
+* **Visible civilizations**: at-a-glance card, space programme panel, planet badges, satellite shells
+  incl. geostationary belt, stations, spacecraft in flight, colony sites and lights, cities and farmland
+  on the ground.
+* **Interventions**: Inspire, Signal, Hardship, Share knowledge, Teach a technology — with a 25-year
+  cooldown and no skipping of prerequisites; undoable sandbox edits.
+### Changed
+* Only the Garden World template guarantees a habitable planet; hot Jupiters can now form.
+* Golden fingerprint re-pinned (energy transition changes long runs).
+### Fixed
+* Stray terrain quads and one-frame flashes of newly spawned bodies.
+
 ## 0.4.0 — Sandbox Foundation (2026-10-03)
 Cosmogon becomes a universe sandbox. Details: docs/MILESTONE_S1.md.
 ### Added

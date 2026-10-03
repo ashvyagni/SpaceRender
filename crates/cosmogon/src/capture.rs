@@ -28,7 +28,7 @@ fn capture(mut commands: Commands, args: Res<Args>, mut frames: Local<u32>, mut 
         info!("capturing screenshot to {path}");
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
     }
-    if *done && args.quit_after_capture && *frames > args.capture_after + 20 {
+    if *done && args.quit_after_capture && *frames > args.capture_after + 20 && (std::path::Path::new(path).exists() || *frames > args.capture_after + 2000) {
         exit.write(AppExit::Success);
     }
 }

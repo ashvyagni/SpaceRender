@@ -55,7 +55,10 @@ pub fn generate_systems(settings: &UniverseSettings) -> Vec<StarSystem> {
             systems.push(sol);
             continue;
         }
-        systems.push(generate_system(settings, i as u32, position, home));
+        // Only the Garden World template promises a living world; a procedural system is
+        // whatever the statistics give (most have no temperate ocean planet at all).
+        let garden = home && settings.scenario == Scenario::GardenWorld;
+        systems.push(generate_system(settings, i as u32, position, garden));
     }
     systems
 }
@@ -164,6 +167,16 @@ fn generate_planets(settings: &UniverseSettings, sys: &mut StarSystem, outer_lim
         planets.push((a_au, kind, mass_e));
         let ratio = if kind == BodyKind::GasGiant { rng.range(1.7, 2.6) } else { rng.range(1.35, 2.1) };
         a_au *= ratio;
+    }
+
+    // Hot Jupiters: ~1% of Sun-like stars host a giant that migrated to a few-day orbit,
+    // more often at high metallicity (Wright et al. 2012; Fischer & Valenti 2005). Such
+    // systems rarely keep close-in neighbours.
+    let mut hrng = Rng::stream(seed, domain::PLANETS, &[sid, 0x407]);
+    if !garden && m > 0.5 && hrng.chance((0.012 * 10f64.dpowf(2.0 * feh)).min(0.08)) {
+        let a_hj = hrng.log_uniform(0.025, 0.09) * m.dcbrt();
+        planets.retain(|p| p.0 > a_hj * 4.0);
+        planets.insert(0, (a_hj, BodyKind::GasGiant, hrng.log_uniform(100.0, 1500.0)));
     }
 
     if garden {
