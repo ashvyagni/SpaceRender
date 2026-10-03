@@ -150,7 +150,7 @@ fn refresh_climate(sys: &mut StarSystem, b: usize, t: f64) {
     update_climate(&mut sys.bodies[b], &star, t, d);
     let body = &mut sys.bodies[b];
     if (body.hydro.ocean_fraction - before).abs() > 0.02 {
-        body.sea_level = terrain::sea_level_for(body.terrain_seed, body.hydro.ocean_fraction);
+        body.sea_level = terrain::Terrain::of(body).sea_level_for(body.hydro.ocean_fraction);
     }
     // Hot, wet worlds lose water to space (moist / runaway greenhouse).
     if body.temperature > 340.0 && body.hydro.water_inventory > 0.0 {
@@ -328,6 +328,18 @@ impl Universe {
         };
         let mut civ = self.make_civ(BodyRef { system: 0, body: earth as u32 }, species, t);
         civ.name = "Humanity".into();
+        // Anatomically modern humans begin in East Africa; where they spread from there is
+        // up to geography, reach and seafaring.
+        let origin = terrain::dir_from_lat_lon((-3.0f64).to_radians(), 36.0f64.to_radians());
+        if let Some(i) = (0..civ.sites.len()).min_by(|&a, &b| {
+            let d = |i: usize| {
+                let v = civ.sites[i].dir();
+                -(v[0] * origin[0] + v[1] * origin[1] + v[2] * origin[2])
+            };
+            d(a).total_cmp(&d(b))
+        }) {
+            civ.sites.swap(0, i);
+        }
         civ.population = 100_000.0;
         let graph = TechGraph::embedded();
         for id in ["stone_tools", "fire", "hunting_weapons", "language"] {
@@ -669,7 +681,7 @@ fn prehistory_one(seed: u64, params: &ScienceParams, mult: LifeMultipliers, mut 
     }
     refresh_climate(&mut sys, b, start);
     let mut body = sys.bodies[b].clone();
-    body.sea_level = terrain::sea_level_for(body.terrain_seed, body.hydro.ocean_fraction);
+    body.sea_level = terrain::Terrain::of(&body).sea_level_for(body.hydro.ocean_fraction);
     sys.bodies[b] = body.clone();
     bio.habitability = assess(&sys, b, start);
     refresh_derived_resources(&mut body, bio.vegetated());

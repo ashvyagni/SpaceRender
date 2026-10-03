@@ -204,7 +204,12 @@ fn camera_input(
     scroll: Res<AccumulatedMouseScroll>,
     keys: Res<ButtonInput<KeyCode>>,
     sim: Res<Sim>,
+    args: Res<Args>,
 ) {
+    // Automated captures must be reproducible: ignore whatever the mouse is doing.
+    if args.capture.is_some() {
+        return;
+    }
     let (wants_pointer, wants_keys) = match contexts.ctx_mut() {
         Ok(ctx) => (ctx.wants_pointer_input() || ctx.is_pointer_over_area(), ctx.wants_keyboard_input()),
         Err(_) => (false, false),

@@ -27,6 +27,7 @@ pub struct Args {
     pub load: Option<String>,
     pub hide_ui: bool,
     pub select_civ: bool,
+    pub debug: bool,
 }
 
 impl Args {
@@ -57,6 +58,7 @@ impl Args {
                 "--load" => a.load = Some(val()),
                 "--hide-ui" => a.hide_ui = true,
                 "--select-civ" => a.select_civ = true,
+                "--debug" => a.debug = true,
                 // macOS passes a process serial number when launched from Finder.
                 f if f.starts_with("-psn_") => {}
                 f => eprintln!("ignoring unknown argument {f}"),

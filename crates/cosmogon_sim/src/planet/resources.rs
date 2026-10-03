@@ -9,7 +9,7 @@
 #[allow(unused_imports)]
 use cosmogon_core::dmath::DMath;
 use crate::astro::{Body, BodyKind, Deposit, ResourceKind, Resources};
-use crate::planet::terrain::{elevation, fibonacci_sphere, lat_lon_from_dir, ridged3_at};
+use crate::planet::terrain::{fibonacci_sphere, lat_lon_from_dir, Terrain};
 use crate::rng::Rng;
 
 pub fn generate_resources(rng: &mut Rng, body: &Body, metallicity: f64, age_gyr: f64, abundance: f64) -> Resources {
@@ -40,11 +40,11 @@ pub fn generate_deposits(rng: &mut Rng, body: &Body) -> Vec<Deposit> {
     if !body.kind.has_surface() {
         return Vec::new();
     }
-    let seed = body.terrain_seed;
+    let terrain = Terrain::of(body);
     let candidates: Vec<([f64; 3], f64, f64)> = fibonacci_sphere(900)
         .map(|d| {
-            let h = elevation(seed, d) - body.sea_level;
-            let ridge = ridged3_at(seed, d);
+            let h = terrain.elevation(d) - body.sea_level;
+            let ridge = terrain.ridge(d);
             (d, h, ridge)
         })
         .collect();

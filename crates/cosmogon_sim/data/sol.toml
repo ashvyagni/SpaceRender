@@ -79,6 +79,8 @@ geology = 1.0
 color = [0.16, 0.36, 0.74]
 # The last glacial period ends ~11,700 years ago (start of the Holocene).
 glacial_until_years = -11700.0
+# Real relief: NOAA ETOPO5 (see ASSETS.md).
+elevation_data = "earth"
 # Earth's endowment defines 1.0 for every resource.
 resources = { iron = 1.0, copper = 1.0, tin = 1.0, coal = 1.0, oil = 1.0, uranium = 1.0, rare_metals = 1.0 }
 

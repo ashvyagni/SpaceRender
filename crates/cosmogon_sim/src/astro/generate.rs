@@ -415,6 +415,7 @@ fn make_body(
         interglacial_fraction: 1.0,
         glacial_phase_years: 0.0,
         glacial_until_years: None,
+        elevation_data: None,
     };
     update_climate(&mut body, star, 0.0, stellar_a_au * AU);
     if garden {
@@ -433,7 +434,7 @@ fn make_body(
         }
     }
     // Climate at the universe's start epoch is refined later; this is the formation state.
-    body.sea_level = terrain::sea_level_for(body.terrain_seed, body.hydro.ocean_fraction);
+    body.sea_level = terrain::Terrain::of(&body).sea_level_for(body.hydro.ocean_fraction);
     let mut rrng = Rng::stream(settings.seed, domain::RESOURCES, &[sys.id as u64, id as u64]);
     body.resources = resources::generate_resources(&mut rrng, &body, star.metallicity, age_gyr, settings.resource_abundance);
     body.deposits = resources::generate_deposits(&mut rrng, &body);

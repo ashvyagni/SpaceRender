@@ -230,6 +230,9 @@ pub struct Body {
     pub rings: Option<Rings>,
     /// Seed for the planet's procedural surface.
     pub terrain_seed: u64,
+    /// Measured elevation that replaces the procedural surface (real bodies).
+    #[serde(default)]
+    pub elevation_data: Option<crate::planet::terrain::ElevationData>,
     /// Terrain elevation threshold that yields the current ocean fraction.
     pub sea_level: f64,
     /// Base colour hint (used for giants and for real bodies' tint).

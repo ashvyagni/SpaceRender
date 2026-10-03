@@ -112,6 +112,7 @@ impl Plugin for UiPlugin {
 
 fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
     ui.hidden = args.hide_ui;
+    ui.debug = args.debug;
     if args.select_civ {
         ui.body_tab = BodyTab::Civilization;
     }

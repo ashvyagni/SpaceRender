@@ -66,6 +66,7 @@ struct SolBody {
     resources: Option<HashMap<String, f64>>,
     rings: Option<Rings>,
     glacial_until_years: Option<f64>,
+    elevation_data: Option<String>,
 }
 
 /// Build the Sol system (at J2000; the star's age is relative to t = 0).
@@ -156,6 +157,11 @@ pub fn sol_system() -> StarSystem {
             interglacial_fraction: 1.0,
             glacial_phase_years: 0.0,
             glacial_until_years: sb.glacial_until_years,
+            elevation_data: match sb.elevation_data.as_deref() {
+                Some("earth") => Some(crate::planet::terrain::ElevationData::Earth),
+                Some(other) => panic!("unknown elevation_data {other}"),
+                None => None,
+            },
         };
         let mut rng = Rng::stream(SOL_SEED, domain::RESOURCES, &[idx as u64]);
         body.resources = resources::generate_resources(&mut rng, &body, file.star.metallicity, age_gyr, 1.0);
@@ -173,7 +179,7 @@ pub fn sol_system() -> StarSystem {
                 }
             }
         }
-        body.sea_level = terrain::sea_level_for(body.terrain_seed, body.hydro.ocean_fraction);
+        body.sea_level = terrain::Terrain::of(&body).sea_level_for(body.hydro.ocean_fraction);
         bodies.push(body);
     }
 

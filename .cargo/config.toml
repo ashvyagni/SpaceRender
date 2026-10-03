@@ -1,0 +1,5 @@
+# Cross-compiling the Windows build from macOS/Linux (brew install mingw-w64;
+# rustup target add x86_64-pc-windows-gnu). Native Windows builds use MSVC and ignore this.
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"

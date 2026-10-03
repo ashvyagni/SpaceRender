@@ -47,8 +47,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Sun glint on oceans (water mask in the alpha channel).
     let h = normalize(l + v);
-    let glint = pow(max(dot(n, h), 0.0), 600.0) * surf.a * planet.params.w * lambert;
-    color += vec3<f32>(1.0, 0.95, 0.85) * glint * 0.5 * (1.0 - cloud);
+    let glint = pow(max(dot(n, h), 0.0), 2000.0) * surf.a * planet.params.w * lambert;
+    color += vec3<f32>(1.0, 0.95, 0.85) * glint * 0.25 * (1.0 - cloud);
 
     // Clouds over the surface.
     color = mix(color, vec3<f32>(0.95) * (lambert + twilight), cloud);
