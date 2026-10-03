@@ -40,13 +40,15 @@ pub struct CameraRig {
     pub yaw: f64,
     pub pitch: f64,
     pub focus_radius: f64,
+    /// Radius of the ground under the camera (terrain-aware when close-up terrain is active).
+    pub ground_radius: f64,
     transition: Option<Transition>,
     pub applied_args: bool,
 }
 
 impl Default for CameraRig {
     fn default() -> Self {
-        Self { focus: None, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, transition: None, applied_args: false }
+        Self { focus: None, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false }
     }
 }
 
@@ -162,7 +164,21 @@ fn initial_focus(mut rig: ResMut<CameraRig>, mut sim: ResMut<Sim>, args: Res<Arg
         }
     }
     let (pos, radius) = target_info(&sim, target);
-    if args.yaw.is_none() {
+    if let (Some((lat, lon)), Target::Body(r)) = (args.latlon, target) {
+        // Camera above a geographic point: body-local direction rotated into the world.
+        let rot = crate::render::body_rotation(&sim, r, sim.universe.time).as_dquat();
+        // "noon" = the longitude currently facing the star.
+        let lon = if lon.is_nan() {
+            let star = rot.inverse() * (to_render(sim.universe.system(r.system).position) - pos);
+            star.y.atan2(star.x).to_degrees() - 55.0
+        } else {
+            lon
+        };
+        let local = cosmogon_sim::planet::terrain::dir_from_lat_lon(lat.to_radians(), lon.to_radians());
+        let d = (rot * DVec3::from_array(local)).normalize();
+        rig.yaw = d.x.atan2(d.z);
+        rig.pitch = d.y.asin();
+    } else if args.yaw.is_none() {
         // Start on the day side, the star a little off to one side.
         let star = to_render(sim.universe.system(target.system()).position);
         let d = (star - pos).normalize_or(DVec3::Z);
@@ -214,22 +230,31 @@ fn camera_input(
         Ok(ctx) => (ctx.wants_pointer_input() || ctx.is_pointer_over_area(), ctx.wants_keyboard_input()),
         Err(_) => (false, false),
     };
+    // Close to a surface, controls work on altitude and slow down so the ground is navigable.
+    let ground = rig.ground_radius;
+    let altitude = (rig.desired_distance - ground).max(1.0);
+    let orbit_rate = 0.005 * (altitude / (rig.focus_radius * 0.5)).clamp(0.0005, 1.0);
+    let zoom_by = |rig: &mut CameraRig, factor: f64| {
+        rig.desired_distance = ground + (rig.desired_distance - ground).max(1.0) * factor;
+    };
     if !wants_pointer {
         if mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right) {
-            rig.yaw -= motion.delta.x as f64 * 0.005;
-            rig.pitch = (rig.pitch + motion.delta.y as f64 * 0.005).clamp(-1.54, 1.54);
+            rig.yaw -= motion.delta.x as f64 * orbit_rate;
+            rig.pitch = (rig.pitch + motion.delta.y as f64 * orbit_rate).clamp(-1.54, 1.54);
         }
         let lines = match scroll.unit {
             MouseScrollUnit::Line => scroll.delta.y as f64,
             MouseScrollUnit::Pixel => scroll.delta.y as f64 / 40.0,
         };
         if lines != 0.0 {
-            rig.desired_distance *= (-lines * 0.15).exp();
+            zoom_by(&mut rig, (-lines * 0.15).exp());
         }
     }
     if !wants_keys {
         let zoom = (keys.pressed(KeyCode::KeyS) as i32 - keys.pressed(KeyCode::KeyW) as i32) as f64;
-        rig.desired_distance *= (zoom * 0.04).exp();
+        if zoom != 0.0 {
+            zoom_by(&mut rig, (zoom * 0.04).exp());
+        }
         rig.yaw += (keys.pressed(KeyCode::KeyA) as i32 - keys.pressed(KeyCode::KeyD) as i32) as f64 * 0.02;
         if keys.just_pressed(KeyCode::KeyF) {
             if let Some(t) = sim.selected {
@@ -244,21 +269,33 @@ fn camera_input(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_camera(
     mut rig: ResMut<CameraRig>,
     sim: Res<Sim>,
+    lod: Res<crate::render::terrain_lod::TerrainLod>,
     time: Res<Time>,
     mut view: ResMut<ViewInfo>,
     windows: Query<&Window>,
-    mut cam: Query<(&mut Transform, &mut Projection), With<MainCamera>>,
+    mut cam: Query<(&mut Transform, &mut Projection, &mut Bloom), With<MainCamera>>,
+    settings: Res<UserSettings>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let Some(focus) = rig.focus else { return };
     let (live_pos, radius) = target_info(&sim, focus);
     rig.focus_radius = radius;
+    // Ground under the camera: real terrain height when close-up terrain is active.
+    rig.ground_radius = match focus {
+        Target::Body(r) => {
+            let rot = crate::render::body_rotation(&sim, r, sim.universe.time).as_dquat();
+            let dir_local = rot.inverse() * (rig.eye() - live_pos);
+            lod.ground_radius(r, dir_local).unwrap_or(radius).max(radius * 0.99)
+        }
+        Target::Star(_) => radius,
+    };
     let min_d = match focus {
         Target::Star(_) => radius * 1.5,
-        Target::Body(_) => radius * 1.00005 + 200.0,
+        Target::Body(_) => rig.ground_radius + 60.0,
     };
     rig.desired_distance = rig.desired_distance.clamp(min_d, 60.0 * LIGHT_YEAR);
 
@@ -290,11 +327,29 @@ fn update_camera(
     if let Ok(w) = windows.single() {
         view.viewport_h = w.height();
     }
-    let Ok((mut tf, mut proj)) = cam.single_mut() else { return };
+    let Ok((mut tf, mut proj, mut bloom)) = cam.single_mut() else { return };
+    // Bloom makes stars glow in space; when a sunlit world fills the view it would only veil
+    // the surface, so fade it with proximity.
+    if settings.graphics.bloom() {
+        let fill = ((rig.distance / radius - 1.0) / 4.0).clamp(0.0, 1.0) as f32;
+        bloom.intensity = 0.03 + 0.19 * fill;
+    }
     let look = (rig.target_pos - eye).as_vec3();
     *tf = Transform::IDENTITY.looking_to(look.normalize_or(Vec3::NEG_Z), Vec3::Y);
+    let altitude = (rig.distance - rig.ground_radius).max(1.0);
+    if matches!(focus, Target::Body(_)) {
+        // Near the ground, tilt the view from "straight down" towards the horizon.
+        let a = altitude / radius;
+        let tilt = (1.0 - a / 0.06).clamp(0.0, 1.0).powf(1.5) as f32 * 1.25;
+        if tilt > 0.0 {
+            let radial = (eye - rig.target_pos).normalize().as_vec3();
+            let up_cam = tf.up().as_vec3();
+            let tangent = (up_cam - radial * up_cam.dot(radial)).normalize_or(Vec3::X);
+            let forward = -radial * tilt.cos() + tangent * tilt.sin();
+            *tf = Transform::IDENTITY.looking_to(forward, radial);
+        }
+    }
     if let Projection::Perspective(p) = proj.as_mut() {
-        let altitude = (rig.distance - radius).max(1.0);
         p.near = (altitude * 0.05).clamp(0.5, 1.0e9) as f32;
         view.fov_y = p.fov;
     }

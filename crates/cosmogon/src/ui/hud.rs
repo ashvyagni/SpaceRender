@@ -12,8 +12,11 @@ use crate::render::ViewInfo;
 use crate::sim::{Sim, Target};
 use crate::state::AppState;
 
-pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, mut ui: ResMut<UiState>, time: Res<Time>) -> Result {
+pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, mut ui: ResMut<UiState>, time: Res<Time>, args: Res<crate::args::Args>) -> Result {
     let ctx = contexts.ctx_mut()?;
+    if args.capture.is_some() {
+        return Ok(());
+    }
     if ctx.wants_keyboard_input() {
         return Ok(());
     }
@@ -201,6 +204,7 @@ pub fn overlays_windows(
     diagnostics: Res<DiagnosticsStore>,
     view: Res<ViewInfo>,
     rig: Res<CameraRig>,
+    lod: Res<crate::render::terrain_lod::TerrainLod>,
     entities: Query<Entity>,
     pending: Query<(), With<crate::render::PendingBake>>,
     mut next: ResMut<NextState<AppState>>,
@@ -227,6 +231,15 @@ pub fn overlays_windows(
                 super::kv(ui, "Seed", u.settings.seed.to_string());
                 super::kv(ui, "Sim time (s)", format!("{:.6e}", u.time));
                 super::kv(ui, "Camera distance", super::distance(rig.distance));
+                super::kv(ui, "Altitude above ground", super::distance(rig.distance - rig.ground_radius));
+                if let Some(f) = rig.focus {
+                    let center = crate::camera::target_info(&sim, f).0;
+                    let star = crate::render::to_render(sim.universe.system(f.system()).position);
+                    let up = (view.origin - center).normalize();
+                    let sun = (star - center).normalize();
+                    super::kv(ui, "Sun elevation at camera", format!("{:.1}°", up.dot(sun).clamp(-1.0, 1.0).asin().to_degrees()));
+                }
+                super::kv(ui, "Terrain patches", format!("{} visible, {} building", lod.visible_patches, lod.building));
                 super::kv(ui, "Floating origin", format!("({:.3e}, {:.3e}, {:.3e})", view.origin.x, view.origin.y, view.origin.z));
             });
         });

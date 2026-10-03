@@ -83,8 +83,10 @@ pub fn update_climate(body: &mut Body, star: &Star, t: f64, stellar_distance_m: 
             body.hydro.ice_fraction = ice.min(1.0 - cover);
             body.hydro.ocean_fraction = (cover - ice * 0.5).max(0.0);
         } else if temp <= 273.15 {
+            // Ice sheets are kilometres thick, so frozen water covers far less area than
+            // the same water as an ocean would.
             body.hydro.ocean_fraction = 0.0;
-            body.hydro.ice_fraction = (cover + 0.05).min(1.0);
+            body.hydro.ice_fraction = (0.71 * w.max(0.0).powf(0.6)).min(1.0);
         } else {
             // Too hot / too thin: water is vapour or lost.
             body.hydro.ocean_fraction = 0.0;

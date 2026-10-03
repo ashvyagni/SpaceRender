@@ -43,7 +43,8 @@ pub fn generate_deposits(rng: &mut Rng, body: &Body) -> Vec<Deposit> {
     let terrain = Terrain::of(body);
     let candidates: Vec<([f64; 3], f64, f64)> = fibonacci_sphere(900)
         .map(|d| {
-            let h = terrain.elevation(d) - body.sea_level;
+            let datum = if body.hydro.ocean_fraction > 0.0 { body.sea_level } else { 0.0 };
+            let h = terrain.elevation(d) - datum;
             let ridge = terrain.ridge(d);
             (d, h, ridge)
         })

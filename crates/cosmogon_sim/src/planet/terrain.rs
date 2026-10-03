@@ -33,7 +33,8 @@ fn earth_grid() -> &'static [i16] {
     GRID.get_or_init(|| EARTH_BYTES.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect())
 }
 
-/// Bilinearly interpolated real elevation (metres) at a unit direction.
+/// Bicubic (Catmull–Rom) interpolated real elevation (metres) at a unit direction.
+/// Bicubic rather than bilinear so coastlines don't follow the grid's staircase.
 pub fn earth_elevation_m(d: [f64; 3]) -> f64 {
     let g = earth_grid();
     let (lat, lon) = lat_lon_from_dir(d);
@@ -41,12 +42,16 @@ pub fn earth_elevation_m(d: [f64; 3]) -> f64 {
     let y = ((std::f64::consts::FRAC_PI_2 - lat) / std::f64::consts::PI * EARTH_H as f64 - 0.5).clamp(0.0, (EARTH_H - 1) as f64);
     let (x0, y0) = (x.floor(), y.floor());
     let (fx, fy) = (x - x0, y - y0);
-    let xi = |dx: i64| ((x0 as i64 + dx).rem_euclid(EARTH_W as i64)) as usize;
-    let yi = |dy: usize| (y0 as usize + dy).min(EARTH_H - 1);
-    let at = |xx: usize, yy: usize| g[yy * EARTH_W + xx] as f64;
-    let top = at(xi(0), yi(0)) * (1.0 - fx) + at(xi(1), yi(0)) * fx;
-    let bottom = at(xi(0), yi(1)) * (1.0 - fx) + at(xi(1), yi(1)) * fx;
-    top * (1.0 - fy) + bottom * fy
+    let at = |dx: i64, dy: i64| {
+        let xx = ((x0 as i64 + dx).rem_euclid(EARTH_W as i64)) as usize;
+        let yy = (y0 as i64 + dy).clamp(0, EARTH_H as i64 - 1) as usize;
+        g[yy * EARTH_W + xx] as f64
+    };
+    let cr = |p0: f64, p1: f64, p2: f64, p3: f64, t: f64| {
+        p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)))
+    };
+    let row = |dy: i64| cr(at(-1, dy), at(0, dy), at(1, dy), at(2, dy), fx);
+    cr(row(-1), row(0), row(1), row(2), fy)
 }
 
 /// The terrain of one body: procedural from a seed, or measured data.
@@ -211,6 +216,10 @@ pub struct SurfaceContext {
     pub mean_temperature: f64,
     pub has_liquid_water: bool,
     pub tidally_locked: bool,
+    /// Whether the world has any surface water/ice at all (no water ⇒ no ice sheets).
+    pub has_water: bool,
+    /// Global ice cover fraction (polar caps on worlds without oceans).
+    pub ice_fraction: f64,
     /// Whether land vegetation exists (biosphere at complex-ecosystem stage or later).
     pub vegetated: bool,
     pub axial_tilt: f64,
@@ -220,10 +229,14 @@ impl SurfaceContext {
     pub fn new(body: &Body, vegetated: bool) -> Self {
         Self {
             terrain: Terrain::of(body),
-            sea_level: body.sea_level,
+            // Worlds without oceans have no sea level (the stored value is a sentinel far
+            // below the terrain); heights are then measured from the mean surface.
+            sea_level: if body.hydro.ocean_fraction > 0.0 { body.sea_level } else { 0.0 },
             mean_temperature: body.temperature,
             has_liquid_water: body.hydro.ocean_fraction > 0.0,
             tidally_locked: body.tidally_locked,
+            has_water: body.hydro.water_inventory > 1e-3 || body.hydro.ice_fraction > 0.0,
+            ice_fraction: body.hydro.ice_fraction,
             vegetated,
             axial_tilt: body.axial_tilt,
         }
@@ -258,7 +271,9 @@ impl SurfaceContext {
             } else {
                 Biome::Ocean
             }
-        } else if temperature < 255.0 {
+        } else if self.has_water && if self.has_liquid_water { temperature < 255.0 } else { d[2].abs() > 1.0 - self.ice_fraction.min(1.0) } {
+            // Ocean worlds freeze where it's cold; dry worlds only hold their limited ice as
+            // polar caps covering the global ice fraction.
             Biome::IceSheet
         } else if height > 0.55 {
             Biome::Mountain

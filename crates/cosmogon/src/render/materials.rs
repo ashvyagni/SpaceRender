@@ -60,3 +60,27 @@ impl Material for AtmosphereMaterial {
         Ok(())
     }
 }
+
+/// Material for close-up terrain patches (vertex colours, shared planet uniforms/textures).
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub struct TerrainMaterial {
+    #[uniform(0)]
+    pub u: PlanetUniform,
+    #[texture(3)]
+    #[sampler(4)]
+    pub clouds: Handle<Image>,
+    #[texture(5)]
+    #[sampler(6)]
+    pub lights: Handle<Image>,
+}
+
+impl Material for TerrainMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://cosmogon/render/shaders/terrain.wgsl".into()
+    }
+    fn specialize(_: &MaterialPipeline, descriptor: &mut RenderPipelineDescriptor, _: &MeshVertexBufferLayoutRef, _: MaterialPipelineKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
+        // Skirts hang below patch edges to hide cracks between detail levels; draw both sides.
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+}

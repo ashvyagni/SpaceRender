@@ -36,6 +36,7 @@ pub fn draw_markers(
     settings: Res<UserSettings>,
     ui_state: Res<UiState>,
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    args: Res<crate::args::Args>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Ok((camera, cam_tf)) = cam.single() else { return Ok(()) };
@@ -256,7 +257,7 @@ pub fn draw_markers(
     // Click handling in the 3D view.
     let (clicked, double, pointer, over_ui) = ctx.input(|i| (i.pointer.primary_clicked(), i.pointer.button_double_clicked(egui::PointerButton::Primary), i.pointer.interact_pos(), false));
     let over_ui = over_ui || ctx.is_pointer_over_area();
-    if (clicked || double) && !over_ui {
+    if (clicked || double) && !over_ui && args.capture.is_none() {
         if let Some(pp) = pointer {
             let best = hits
                 .iter()

@@ -28,6 +28,8 @@ pub struct Args {
     pub hide_ui: bool,
     pub select_civ: bool,
     pub debug: bool,
+    /// Place the camera above this latitude,longitude (degrees) of the focused body.
+    pub latlon: Option<(f64, f64)>,
 }
 
 impl Args {
@@ -59,6 +61,13 @@ impl Args {
                 "--hide-ui" => a.hide_ui = true,
                 "--select-civ" => a.select_civ = true,
                 "--debug" => a.debug = true,
+                "--latlon" => {
+                    let v = val();
+                    let mut it = v.split(',').map(|x| if x.trim() == "noon" { Ok(f64::NAN) } else { x.trim().parse::<f64>() });
+                    if let (Some(Ok(la)), Some(Ok(lo))) = (it.next(), it.next()) {
+                        a.latlon = Some((la, lo));
+                    }
+                }
                 // macOS passes a process serial number when launched from Finder.
                 f if f.starts_with("-psn_") => {}
                 f => eprintln!("ignoring unknown argument {f}"),

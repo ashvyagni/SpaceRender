@@ -13,6 +13,7 @@ pub mod bake;
 pub mod materials;
 pub mod overlays;
 mod sky;
+pub mod terrain_lod;
 
 use std::f64::consts::TAU;
 
@@ -113,16 +114,22 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/planet.wgsl");
         embedded_asset!(app, "shaders/atmosphere.wgsl");
-        app.add_plugins((MaterialPlugin::<PlanetMaterial>::default(), MaterialPlugin::<AtmosphereMaterial>::default()))
+        embedded_asset!(app, "shaders/terrain.wgsl");
+        app.add_plugins((
+            MaterialPlugin::<PlanetMaterial>::default(),
+            MaterialPlugin::<AtmosphereMaterial>::default(),
+            MaterialPlugin::<materials::TerrainMaterial>::default(),
+        ))
             .init_resource::<ViewInfo>()
+            .init_resource::<terrain_lod::TerrainLod>()
             .add_systems(Startup, sky::setup_sky)
             .add_systems(OnEnter(AppState::Observing), spawn_universe)
             .add_systems(OnExit(AppState::Observing), despawn_universe)
             .add_systems(
                 Update,
                 (
-                    update_world_positions.in_set(Frame::Positions),
-                    (apply_origin, update_planet_materials, request_bakes, finish_bakes, update_lights).chain().in_set(Frame::Apply),
+                    (update_world_positions, terrain_lod::position_patches, terrain_lod::sink_base_sphere).chain().in_set(Frame::Positions),
+                    (terrain_lod::update_terrain_lod, apply_origin, update_planet_materials, request_bakes, finish_bakes, update_lights).chain().in_set(Frame::Apply),
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             )
@@ -271,7 +278,8 @@ fn spawn_universe(
     info!("spawned visuals for {} systems", u.systems.len());
 }
 
-fn despawn_universe(mut commands: Commands, q: Query<Entity, With<SimVisual>>) {
+fn despawn_universe(mut commands: Commands, q: Query<Entity, With<SimVisual>>, mut lod: ResMut<terrain_lod::TerrainLod>) {
+    *lod = terrain_lod::TerrainLod::default();
     for e in &q {
         commands.entity(e).despawn();
     }
@@ -331,7 +339,7 @@ fn sun_intensity(flux_rel_earth: f64) -> f32 {
 fn update_planet_materials(
     sim: Res<Sim>,
     view: Res<ViewInfo>,
-    bodies: Query<(&BodyVisual, &WorldPos, &MeshMaterial3d<PlanetMaterial>, &Children)>,
+    bodies: Query<(&BodyVisual, &WorldPos, &MeshMaterial3d<PlanetMaterial>, Option<&Children>)>,
     shells: Query<&MeshMaterial3d<AtmosphereMaterial>>,
     stars: Query<(&StarVisual, &WorldPos)>,
     mut planet_mats: ResMut<Assets<PlanetMaterial>>,
@@ -362,7 +370,7 @@ fn update_planet_materials(
             let cloud_drift = (t / (86_400.0 * 9.0)).rem_euclid(1.0) as f32;
             m.u.params = Vec4::new(cloud_drift, 0.85, lights, if body.hydro.ocean_fraction > 0.0 { 1.0 } else { 0.0 });
         }
-        for child in children.iter() {
+        for child in children.into_iter().flat_map(|c| c.iter()) {
             if let Ok(shell) = shells.get(child) {
                 if let Some(m) = atmo_mats.get_mut(&shell.0) {
                     m.u.sun = sun;

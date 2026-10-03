@@ -24,7 +24,7 @@ fn srgb(c: [f32; 3]) -> [u8; 3] {
     c.map(|x| (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
 }
 
-fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+pub fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
@@ -107,49 +107,7 @@ pub fn bake_surface(body: &Body, vegetated: bool, width: u32) -> BakedSurface {
                     let deck = if titan_haze { [0.78, 0.58, 0.28] } else { [0.93, 0.85, 0.62] };
                     (mix3(deck, [deck[0] * 0.85, deck[1] * 0.8, deck[2] * 0.7], 0.5 + n), false)
                 }
-                BodyKind::Icy => {
-                    let cracks = ridged3(seed, [d[0] * 4.0, d[1] * 4.0, d[2] * 4.0], 5) as f32;
-                    let mottle = fbm3(seed, [d[0] * 2.0, d[1] * 2.0, d[2] * 2.0], 4, 2.0, 0.5) as f32;
-                    let c = mix3(base, [base[0] * 0.55, base[1] * 0.45, base[2] * 0.35], cracks.powf(6.0) * 0.8 + mottle * 0.2);
-                    (c, false)
-                }
-                BodyKind::Rocky => {
-                    let s = ctx.sample(d);
-                    let detail = fbm3(seed ^ 0x5151, [d[0] * 9.0, d[1] * 9.0, d[2] * 9.0], 4, 2.0, 0.5) as f32;
-                    let sm = |e0: f64, e1: f64, x: f64| cosmogon_sim::planet::terrain::smoothstep(e0, e1, x) as f32;
-                    let mut c = match s.biome {
-                        Biome::Ocean | Biome::SeaIce => {
-                            let shallow = (1.0 + s.height / 0.12).clamp(0.0, 1.0) as f32;
-                            let water = mix3([0.02, 0.07, 0.19], [0.05, 0.25, 0.38], shallow * shallow);
-                            // Sea ice fades in continuously with temperature.
-                            mix3(water, [0.82, 0.87, 0.93], sm(273.0, 266.0, s.temperature))
-                        }
-                        Biome::Barren => {
-                            let h = (s.height as f32 * 0.5 + 0.5).clamp(0.0, 1.0);
-                            let crater = ridged3(seed ^ 0xC4A7, [d[0] * 6.0, d[1] * 6.0, d[2] * 6.0], 3) as f32;
-                            let rock = mix3([base[0] * 0.55, base[1] * 0.5, base[2] * 0.45], [base[0] * 1.15, base[1] * 1.1, base[2] * 1.05], h + detail * 0.3 - crater.powf(8.0) * 0.4);
-                            mix3(rock, [0.93, 0.95, 0.98], sm(262.0, 250.0, s.temperature))
-                        }
-                        _ if !ctx.vegetated => biome_color(s.biome),
-                        _ => {
-                            // Continuous blend from the same fields that define biomes, so
-                            // transitions are gradual rather than pixel-stepped.
-                            let m = s.moisture;
-                            let warm = sm(270.0, 300.0, s.temperature);
-                            let dry = mix3([0.80, 0.68, 0.45], [0.58, 0.52, 0.28], sm(0.15, 0.35, m));
-                            let green = mix3([0.42, 0.48, 0.23], mix3([0.16, 0.33, 0.13], [0.08, 0.26, 0.08], warm), sm(0.45, 0.7, m));
-                            let mut land = mix3(dry, green, sm(0.25, 0.5, m));
-                            land = mix3([0.46, 0.45, 0.38], land, sm(262.0, 280.0, s.temperature));
-                            land = mix3(land, [0.42, 0.38, 0.33], sm(0.4, 0.65, s.height));
-                            mix3(land, [0.93, 0.95, 0.98], sm(262.0, 250.0, s.temperature).max(if s.height > 0.5 { sm(272.0, 262.0, s.temperature) } else { 0.0 }))
-                        }
-                    };
-                    if s.biome == Biome::Mountain && !ctx.vegetated && s.temperature < 268.0 {
-                        c = mix3(c, [0.95, 0.96, 0.98], 0.8);
-                    }
-                    let shade = 1.0 + detail * 0.18 + (s.height.max(0.0) as f32) * 0.1;
-                    ([c[0] * shade, c[1] * shade, c[2] * shade], s.biome == Biome::Ocean)
-                }
+                _ => surface_color(body.kind, &ctx, base, seed, d),
             };
             let px = srgb(rgb);
             let i = x as usize * 4;
@@ -181,6 +139,58 @@ pub fn bake_surface(body: &Body, vegetated: bool, width: u32) -> BakedSurface {
     };
 
     BakedSurface { width, height, albedo, clouds }
+}
+
+
+/// Surface colour (sRGB, 0..1) and water mask for a solid body at unit direction `d`.
+/// Shared by the texture baker and the close-up terrain meshes so both always agree.
+pub fn surface_color(kind: BodyKind, ctx: &SurfaceContext, base: [f32; 3], seed: u64, d: [f64; 3]) -> ([f32; 3], bool) {
+    match kind {
+        BodyKind::Icy => {
+            let cracks = ridged3(seed, [d[0] * 4.0, d[1] * 4.0, d[2] * 4.0], 5) as f32;
+            let mottle = fbm3(seed, [d[0] * 2.0, d[1] * 2.0, d[2] * 2.0], 4, 2.0, 0.5) as f32;
+            let c = mix3(base, [base[0] * 0.55, base[1] * 0.45, base[2] * 0.35], cracks.powf(6.0) * 0.8 + mottle * 0.2);
+            (c, false)
+        }
+        BodyKind::Rocky => {
+            let s = ctx.sample(d);
+            let detail = fbm3(seed ^ 0x5151, [d[0] * 9.0, d[1] * 9.0, d[2] * 9.0], 4, 2.0, 0.5) as f32;
+            let sm = |e0: f64, e1: f64, x: f64| cosmogon_sim::planet::terrain::smoothstep(e0, e1, x) as f32;
+            let mut c = match s.biome {
+                Biome::Ocean | Biome::SeaIce => {
+                    let shallow = (1.0 + s.height / 0.12).clamp(0.0, 1.0) as f32;
+                    let water = mix3([0.02, 0.07, 0.19], [0.05, 0.25, 0.38], shallow * shallow);
+                    // Sea ice fades in continuously with temperature.
+                    mix3(water, [0.82, 0.87, 0.93], sm(273.0, 266.0, s.temperature))
+                }
+                b if b == Biome::Barren || (b == Biome::Mountain && !ctx.vegetated) => {
+                    let h = (s.height as f32 * 0.5 + 0.5).clamp(0.0, 1.0);
+                    let crater = ridged3(seed ^ 0xC4A7, [d[0] * 6.0, d[1] * 6.0, d[2] * 6.0], 3) as f32;
+                    let rock = mix3([base[0] * 0.55, base[1] * 0.5, base[2] * 0.45], [base[0] * 1.15, base[1] * 1.1, base[2] * 1.05], h + detail * 0.3 - crater.powf(8.0) * 0.4);
+                    rock
+                }
+                _ if !ctx.vegetated => biome_color(s.biome),
+                _ => {
+                    // Continuous blend from the same fields that define biomes, so
+                    // transitions are gradual rather than pixel-stepped.
+                    let m = s.moisture;
+                    let warm = sm(270.0, 300.0, s.temperature);
+                    let dry = mix3([0.80, 0.68, 0.45], [0.58, 0.52, 0.28], sm(0.15, 0.35, m));
+                    let green = mix3([0.42, 0.48, 0.23], mix3([0.16, 0.33, 0.13], [0.08, 0.26, 0.08], warm), sm(0.45, 0.7, m));
+                    let mut land = mix3(dry, green, sm(0.25, 0.5, m));
+                    land = mix3([0.46, 0.45, 0.38], land, sm(262.0, 280.0, s.temperature));
+                    land = mix3(land, [0.42, 0.38, 0.33], sm(0.4, 0.65, s.height));
+                    mix3(land, [0.93, 0.95, 0.98], sm(262.0, 250.0, s.temperature).max(if s.height > 0.5 { sm(272.0, 262.0, s.temperature) } else { 0.0 }))
+                }
+            };
+            if s.biome == Biome::Mountain && ctx.has_liquid_water && !ctx.vegetated && s.temperature < 268.0 {
+                c = mix3(c, [0.95, 0.96, 0.98], 0.8);
+            }
+            let shade = 1.0 + detail * 0.18 + (s.height.max(0.0) as f32) * 0.1;
+            ([c[0] * shade, c[1] * shade, c[2] * shade], s.biome == Biome::Ocean)
+        }
+        _ => (base, false),
+    }
 }
 
 /// Night-side lights from a civilization's settlements and transport links (R8).
@@ -269,6 +279,17 @@ pub fn bake_rings(seed: u64, opacity: f64, tint: [f32; 3]) -> Vec<u8> {
 mod tests {
     use super::*;
     use cosmogon_sim::astro::sol;
+
+    #[test]
+    fn airless_worlds_are_not_black() {
+        let sys = sol::sol_system();
+        for name in ["Moon", "Mars", "Mercury", "Io", "Callisto"] {
+            let b = &sys.bodies[sys.find_body(name).unwrap()];
+            let baked = bake_surface(b, false, 64);
+            let mean = baked.albedo.chunks(4).map(|p| p[0] as f64 + p[1] as f64 + p[2] as f64).sum::<f64>() / (64.0 * 32.0 * 3.0);
+            assert!(mean > 40.0, "{name} albedo mean {mean}");
+        }
+    }
 
     #[test]
     fn earth_texture_has_oceans_and_land() {
