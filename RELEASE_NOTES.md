@@ -1,4 +1,4 @@
-# Cosmogon 0.4.0 — "Sandbox Foundation"
+# Cosmogon 0.5.0 — "Worlds and civilizations you can see"
 
 A free, open-source simulator of a living universe: stars, planets, life and civilizations
 that discover technology through causes rather than timers.
@@ -6,9 +6,9 @@ that discover technology through causes rather than timers.
 ## Downloads
 | Platform | File | Notes |
 |---|---|---|
-| macOS 11+ (Apple Silicon & Intel) | `Cosmogon-0.4.0-macOS.dmg` | Open, drag Cosmogon to Applications. |
-| Windows 10/11 (64-bit) | `Cosmogon-0.4.0-Windows-Setup.exe` | Installer with Start-menu shortcut. |
-| Windows 10/11 (64-bit) | `Cosmogon-0.4.0-Windows.exe` | Portable: just run it. |
+| macOS 11+ (Apple Silicon & Intel) | `Cosmogon-0.5.0-macOS.dmg` | Open, drag Cosmogon to Applications. |
+| Windows 10/11 (64-bit) | `Cosmogon-0.5.0-Windows-Setup.exe` | Installer with Start-menu shortcut. |
+| Windows 10/11 (64-bit) | `Cosmogon-0.5.0-Windows.exe` | Portable: just run it. |
 | Linux x86-64 | `Cosmogon-linux-x86_64.tar.gz` | Extract and run `cosmogon`. |
 
 Nothing else needs to be installed. A GPU with Metal, Vulkan or DirectX 12 is required.
@@ -22,20 +22,27 @@ warns the first time:
 * **Windows:** SmartScreen → **More info** → **Run anyway**.
 
 ## What's new
-* **A universe sandbox.** A new home screen with New Sandbox (seven templates), Continue, Load,
-  Real Universe and Scenarios. Every experiment is saved in its own folder with autosave,
-  checkpoints, duplicates and thumbnails.
-* **The real Solar System, today.** The Solar System Lab starts from NASA/JPL Horizons positions
-  and velocities for 1 January 2026. Run it for a year and the planets land within kilometres of
-  where JPL says they will be.
-* **Real gravity.** Dynamic N-body physics: add a planet and every other planet feels it.
-  Collisions merge bodies; close encounters are integrated accurately; presets from Fast to Research.
-* **Create and launch.** Add planets, moons, giants, dwarf planets, asteroids and comets; throw
-  them at a target and see the predicted path — and any impact — before you release.
-* **Edit anything, undo anything.** Mass, radius, gravity, day length, tilt, orbit, atmosphere,
-  water, the Sun's mass and age — in your choice of units, with every value labelled MEASURED,
-  DERIVED, ESTIMATED, PROCEDURAL or USER MODIFIED.
-* **Consequences.** Move a planet or change the Sun and its climate, habitability and
-  civilizations respond. Impacts leave craters, cause impact winters and mass extinctions.
-* **Scenarios.** No Moon · 2× Jupiter · a brighter Sun · Chicxulub today · a rogue planet ·
-  two moons · Mars with Earth's air.
+
+**Every world has its own face.** Io's volcanoes and red plume rings, Europa's cracked ice,
+Ganymede's grooves, Callisto's ancient craters, Enceladus's tiger stripes, Titan's orange haze,
+Venus's clouds, Jupiter's belts and Great Red Spot, Saturn's hexagon and measured rings,
+Neptune's dark storm. Exoplanets follow real temperature classes: cream, white, cloudless-blue,
+dark and glowing hot Jupiters, lava worlds, mini-Neptunes.
+
+**Light done properly.** Atmospheric scattering (blue skies, sunsets, Titan's haze), moon
+shadows and eclipses, ring shadows, living stellar surfaces, detail that keeps going as you zoom.
+
+**Humanity in 2026.** The Solar System Lab starts with 8.23 billion people, real cities and
+countries, 11 000 satellites, the real exploration record and BepiColombo, Europa Clipper and
+JUICE in flight.
+
+**Civilizations you can watch.** Era, Kardashev rating and next breakthroughs at a glance;
+satellites, stations, spacecraft and colonies visible in space; cities and farmland on the
+ground. Civilizations explore their systems, land on other worlds, send colony ships and move
+away from fossil fuels on their own.
+
+**Interfere — within limits.** Inspire, send a signal, share knowledge, teach a technology they
+are ready for, or test them with hardship; once every 25 years, never skipping their own history.
+
+Also: procedural systems no longer guarantee an Earth-like planet; hot Jupiters can form.
+Full details: `docs/MILESTONE_G1_C1.md` and `CHANGELOG.md`.
