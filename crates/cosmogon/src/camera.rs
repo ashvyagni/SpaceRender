@@ -237,8 +237,10 @@ fn camera_input(
     let zoom_by = |rig: &mut CameraRig, factor: f64| {
         rig.desired_distance = ground + (rig.desired_distance - ground).max(1.0) * factor;
     };
+    // With the throw and grab tools the left button belongs to the tool; orbit with the right.
+    let tool_owns_left = matches!(sim.tool, crate::sim::Tool::Throw(_) | crate::sim::Tool::Grab);
     if !wants_pointer {
-        if mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right) {
+        if (mouse.pressed(MouseButton::Left) && !tool_owns_left) || mouse.pressed(MouseButton::Right) {
             rig.yaw -= motion.delta.x as f64 * orbit_rate;
             rig.pitch = (rig.pitch + motion.delta.y as f64 * orbit_rate).clamp(-1.54, 1.54);
         }

@@ -2,6 +2,7 @@
 //! (select, focus, speed, save…); it never mutates the simulation model directly.
 
 mod charts;
+mod dock;
 pub mod home;
 mod hud;
 mod inspect;
@@ -132,7 +133,7 @@ impl Plugin for UiPlugin {
             .add_systems(EguiPrimaryContextPass, (home::generating).after(apply_theme).run_if(in_state(AppState::Generating)))
             .add_systems(
                 EguiPrimaryContextPass,
-                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows)
+                (markers::draw_markers, hud::keyboard, hud::top_bar, hud::bottom_bar, dock::tool_dock, inspect::left_panel, inspect::right_panel, tools::tool_windows, hud::toasts, hud::overlays_windows)
                     .chain()
                     .after(apply_theme)
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
@@ -174,10 +175,27 @@ fn init_ui_state(mut ui: ResMut<UiState>, args: Res<crate::args::Args>) {
     }
 }
 
+/// Icon glyphs (Phosphor, MIT) — use inside any text.
+pub use egui_phosphor::regular as icon;
+
+/// Inter for text (SIL Open Font License), Phosphor for icons, egui's fonts as fallbacks.
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("inter".into(), std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../../assets/fonts/Inter-Regular.ttf"))));
+    if let Some(f) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        f.insert(0, "inter".into());
+    }
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    ctx.set_fonts(fonts);
+}
+
 fn apply_theme(mut contexts: EguiContexts, mut done: Local<Option<f32>>, settings: Res<crate::persistence::UserSettings>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if *done == Some(settings.ui_scale) {
         return Ok(());
+    }
+    if done.is_none() {
+        install_fonts(ctx);
     }
     *done = Some(settings.ui_scale);
     ctx.set_zoom_factor(settings.ui_scale);
@@ -185,10 +203,10 @@ fn apply_theme(mut contexts: EguiContexts, mut done: Local<Option<f32>>, setting
     use egui::{FontFamily::*, FontId, TextStyle};
     style.text_styles = [
         (TextStyle::Heading, FontId::new(19.0, Proportional)),
-        (TextStyle::Body, FontId::new(13.5, Proportional)),
+        (TextStyle::Body, FontId::new(13.0, Proportional)),
         (TextStyle::Monospace, FontId::new(12.5, Monospace)),
-        (TextStyle::Button, FontId::new(13.5, Proportional)),
-        (TextStyle::Small, FontId::new(11.0, Proportional)),
+        (TextStyle::Button, FontId::new(13.0, Proportional)),
+        (TextStyle::Small, FontId::new(10.5, Proportional)),
     ]
     .into();
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
@@ -196,8 +214,10 @@ fn apply_theme(mut contexts: EguiContexts, mut done: Local<Option<f32>>, setting
     let v = &mut style.visuals;
     *v = egui::Visuals::dark();
     v.panel_fill = PANEL;
-    v.window_fill = egui::Color32::from_rgba_premultiplied(12, 16, 27, 245);
-    v.window_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(40, 50, 70));
+    v.window_fill = egui::Color32::from_rgba_premultiplied(11, 14, 24, 242);
+    v.window_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(36, 44, 62));
+    v.window_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 28, spread: 0, color: egui::Color32::from_black_alpha(140) };
+    v.popup_shadow = egui::epaint::Shadow { offset: [0, 6], blur: 18, spread: 0, color: egui::Color32::from_black_alpha(120) };
     v.extreme_bg_color = egui::Color32::from_rgb(6, 8, 14);
     v.faint_bg_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 6);
     v.selection.bg_fill = egui::Color32::from_rgb(92, 70, 32);

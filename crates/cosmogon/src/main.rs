@@ -10,6 +10,7 @@
 mod args;
 mod camera;
 mod capture;
+mod interact;
 mod persistence;
 mod render;
 mod sim;
@@ -50,6 +51,7 @@ fn main() {
             camera::CameraPlugin,
             ui::UiPlugin,
             capture::CapturePlugin,
+            interact::InteractPlugin,
         ))
         .run();
 }

@@ -155,7 +155,7 @@ fn draw_predictions(mut gizmos: Gizmos, sim: Res<Sim>, view: Res<ViewInfo>, sett
         Some(r) => r.system,
         None => match sim.launch_target() {
             Some(t) => t.system,
-            None => 0,
+            None => sim.prediction.system,
         },
     };
     let Some(sys) = u.systems.get(system as usize) else { return };

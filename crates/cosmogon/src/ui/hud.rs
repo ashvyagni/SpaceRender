@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use cosmogon_sim::time::{format_duration, SPEEDS};
 
-use super::{UiState, ACCENT, CIV, LIFE, MUTED, TEXT};
+use super::{icon, UiState, ACCENT, ACCENT_DIM, CIV, LIFE, MUTED, TEXT};
 use crate::camera::{find_target, CameraRig};
 use crate::persistence::{list_saves, UserSettings};
 use crate::render::ViewInfo;
@@ -68,80 +68,98 @@ pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut
     Ok(())
 }
 
+/// A square icon button with a tooltip; `on` draws it as active.
+pub fn icon_button(ui: &mut egui::Ui, glyph: &str, tip: &str, on: bool, enabled: bool) -> egui::Response {
+    let text = egui::RichText::new(glyph).size(17.0).color(if !enabled { MUTED.gamma_multiply(0.5) } else if on { ACCENT } else { TEXT });
+    let mut b = egui::Button::new(text).min_size(egui::vec2(32.0, 30.0)).corner_radius(7);
+    b = if on { b.fill(egui::Color32::from_rgb(58, 45, 22)).stroke(egui::Stroke::new(1.0_f32, ACCENT_DIM)) } else { b.fill(egui::Color32::TRANSPARENT) };
+    ui.add_enabled(enabled, b).on_hover_text(tip)
+}
+
 pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, mut settings: ResMut<UserSettings>, time: Res<Time>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui_state.hidden {
         return Ok(());
     }
     let now = time.elapsed_secs_f64();
-    egui::TopBottomPanel::top("top").exact_height(44.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(egui::Margin::symmetric(12, 6))).show(ctx, |ui| {
+    let frame = egui::Frame::new().fill(super::PANEL).inner_margin(egui::Margin::symmetric(10, 6)).stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(24, 30, 44)));
+    egui::TopBottomPanel::top("top").exact_height(46.0).frame(frame).show(ctx, |ui| {
         ui.horizontal_centered(|ui| {
-            if ui.button("☰").on_hover_text("Menu (Esc)").clicked() {
+            if icon_button(ui, icon::LIST, "Menu (Esc)", ui_state.pause_menu, true).clicked() {
                 ui_state.pause_menu = !ui_state.pause_menu;
             }
-            ui.label(egui::RichText::new("COSMOGON").strong().extra_letter_spacing(3.0));
+            ui.label(egui::RichText::new("COSMOGON").size(13.0).color(TEXT).extra_letter_spacing(3.5));
             let reference = sim.is_reference();
-            let (badge, color) = if reference { ("REFERENCE · READ-ONLY", egui::Color32::from_rgb(110, 180, 240)) } else { ("SANDBOX", ACCENT) };
-            egui::Frame::new().stroke(egui::Stroke::new(1.0_f32, color)).corner_radius(4).inner_margin(egui::Margin::symmetric(6, 2)).show(ui, |ui| {
-                ui.label(egui::RichText::new(badge).size(10.0).color(color).strong());
+            let (badge, color) = if reference { ("REFERENCE", egui::Color32::from_rgb(110, 180, 240)) } else { ("SANDBOX", ACCENT) };
+            egui::Frame::new().fill(color.gamma_multiply(0.12)).corner_radius(10).inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
+                ui.label(egui::RichText::new(badge).size(9.5).color(color).extra_letter_spacing(1.2));
             });
             let title = sim.session.title();
-            ui.label(egui::RichText::new(format!("{title}{}", if sim.dirty && !reference { " •" } else { "" })).color(TEXT).size(13.0)).on_hover_text(if sim.dirty { "Unsaved changes (Cmd/Ctrl+S to save; autosave also runs)" } else { "Saved" });
-            ui.separator();
-            if reference {
-                if ui.add(egui::Button::new(egui::RichText::new("Clone to sandbox").strong()).fill(egui::Color32::from_rgb(70, 54, 24))).on_hover_text("Copy this real-data state into your own experiment").clicked() {
-                    ui_state.clone_dialog = Some("My Solar System experiment".into());
-                }
-            } else {
-                let undo = sim.undo_label().map(|s| s.to_string());
-                let redo = sim.redo_label().map(|s| s.to_string());
-                if ui.add_enabled(undo.is_some(), egui::Button::new("Undo")).on_hover_text(undo.map(|u| format!("Undo: {u} (Cmd/Ctrl+Z)")).unwrap_or_default()).clicked() {
-                    sim.undo(now);
-                }
-                if ui.add_enabled(redo.is_some(), egui::Button::new("Redo")).on_hover_text(redo.map(|u| format!("Redo: {u} (Shift+Cmd/Ctrl+Z)")).unwrap_or_default()).clicked() {
-                    sim.redo(now);
-                }
-                ui.separator();
-                if ui.selectable_label(ui_state.create_open, "+ Create").on_hover_text("Add a planet, moon, asteroid or comet").clicked() {
-                    ui_state.create_open = !ui_state.create_open;
-                }
-                let launching = matches!(sim.tool, crate::sim::Tool::Launch(_));
-                if ui.selectable_label(launching, "Launch").on_hover_text("Throw an object at a target").clicked() {
-                    sim.tool = if launching { crate::sim::Tool::Select } else { crate::sim::Tool::Launch(Default::default()) };
-                }
+            ui.label(egui::RichText::new(format!("{title}{}", if sim.dirty && !reference { "  •" } else { "" })).color(MUTED).size(12.5)).on_hover_text(if sim.dirty { "Unsaved changes (Cmd/Ctrl+S; autosave also runs)" } else { "Saved" });
+            if reference && ui.add(egui::Button::new(egui::RichText::new(format!("{}  Clone to sandbox", icon::COPY)).color(ACCENT)).corner_radius(7)).on_hover_text("Copy this real-data state into your own experiment").clicked() {
+                ui_state.clone_dialog = Some("My Solar System experiment".into());
             }
-            if ui.selectable_label(ui_state.physics_open, "Physics").clicked() {
-                ui_state.physics_open = !ui_state.physics_open;
-            }
-            ui.separator();
-            // Search across systems, bodies and civilizations (⌘K for everything).
-            let resp = ui.add(egui::TextEdit::singleline(&mut ui_state.search).hint_text("Search… (Cmd/Ctrl+K: commands)").desired_width(190.0));
-            if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                let q = ui_state.search.trim().to_string();
-                let found = find_target(&sim, &q).or_else(|| sim.universe.civs.iter().find(|c| c.name.to_lowercase().contains(&q.to_lowercase())).map(|c| Target::Body(cosmogon_sim::BodyRef { system: c.system, body: c.body })));
-                match found {
-                    Some(t) => {
-                        sim.selected = Some(t);
-                        rig.focus_on(t, &sim, None);
-                        ui_state.search.clear();
+
+            // Centre: search (Enter jumps there; Cmd/Ctrl+K opens every command).
+            let avail = ui.available_width();
+            ui.add_space((avail * 0.5 - 330.0).max(8.0));
+            egui::Frame::new().fill(egui::Color32::from_rgb(16, 21, 33)).corner_radius(9).stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(32, 40, 58))).inner_margin(egui::Margin::symmetric(10, 3)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(icon::MAGNIFYING_GLASS).color(MUTED));
+                    let resp = ui.add(egui::TextEdit::singleline(&mut ui_state.search).hint_text("Search worlds, stars, civilizations…   ⌘K for commands").frame(false).desired_width(300.0));
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        let q = ui_state.search.trim().to_string();
+                        let found = find_target(&sim, &q).or_else(|| sim.universe.civs.iter().find(|c| c.name.to_lowercase().contains(&q.to_lowercase())).map(|c| Target::Body(cosmogon_sim::BodyRef { system: c.system, body: c.body })));
+                        match found {
+                            Some(t) => {
+                                sim.selected = Some(t);
+                                rig.focus_on(t, &sim, None);
+                                ui_state.search.clear();
+                            }
+                            None => sim.status = Some((format!("Nothing called “{q}”"), now)),
+                        }
                     }
-                    None => sim.status = Some((format!("Nothing called “{q}”"), now)),
-                }
-            }
+                });
+            });
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.toggle_value(&mut ui_state.show_right, "Inspector");
-                ui.toggle_value(&mut ui_state.show_left, "Universe");
-                ui.menu_button("View", |ui| {
+                if icon_button(ui, icon::SIDEBAR_SIMPLE, "Inspector panel", ui_state.show_right, true).clicked() {
+                    ui_state.show_right = !ui_state.show_right;
+                }
+                if icon_button(ui, icon::TREE_STRUCTURE, "Universe panel (worlds, chronicle, civilizations)", ui_state.show_left, true).clicked() {
+                    ui_state.show_left = !ui_state.show_left;
+                }
+                if icon_button(ui, icon::QUESTION, "Controls (F1)", ui_state.help, true).clicked() {
+                    ui_state.help = !ui_state.help;
+                }
+                ui.menu_button(egui::RichText::new(icon::EYE).size(17.0), |ui| {
+                    ui.label(egui::RichText::new("SHOW").size(10.0).color(ACCENT));
                     ui.checkbox(&mut settings.show_orbits, "Orbits");
                     ui.checkbox(&mut settings.show_labels, "Labels");
                     ui.checkbox(&mut settings.show_trails, "Trails (past path)");
                     ui.checkbox(&mut settings.show_predictions, "Predicted trajectory");
                     ui.checkbox(&mut settings.show_velocity, "Velocity vector");
                     ui.separator();
-                    ui.checkbox(&mut settings.advanced, "Advanced mode");
-                });
-                if ui.button("?").on_hover_text("Controls (F1)").clicked() {
-                    ui_state.help = !ui_state.help;
+                    ui.checkbox(&mut settings.advanced, "Advanced mode (all fields, scientific units)");
+                })
+                .response
+                .on_hover_text("What to show");
+                if icon_button(ui, icon::ATOM, "Physics: gravity model, accuracy, diagnostics", ui_state.physics_open, true).clicked() {
+                    ui_state.physics_open = !ui_state.physics_open;
+                }
+                if !reference {
+                    ui.separator();
+                    if icon_button(ui, icon::FLOPPY_DISK, "Save (Cmd/Ctrl+S)", false, true).clicked() {
+                        super::tools::run_command(super::tools::Cmd::Save, &mut ui_state, &mut sim, &mut settings, now);
+                    }
+                    let redo = sim.redo_label().map(|s| s.to_string());
+                    if icon_button(ui, icon::ARROW_CLOCKWISE, &redo.clone().map(|u| format!("Redo: {u} (Shift+Cmd/Ctrl+Z)")).unwrap_or_else(|| "Nothing to redo".into()), false, redo.is_some()).clicked() {
+                        sim.redo(now);
+                    }
+                    let undo = sim.undo_label().map(|s| s.to_string());
+                    if icon_button(ui, icon::ARROW_COUNTER_CLOCKWISE, &undo.clone().map(|u| format!("Undo: {u} (Cmd/Ctrl+Z)")).unwrap_or_else(|| "Nothing to undo".into()), false, undo.is_some()).clicked() {
+                        sim.undo(now);
+                    }
                 }
                 if let Some((m, at)) = sim.status.clone() {
                     if now - at < 5.0 {
@@ -159,42 +177,49 @@ pub fn bottom_bar(mut contexts: EguiContexts, ui_state: Res<UiState>, mut sim: R
     if ui_state.hidden {
         return Ok(());
     }
-    egui::TopBottomPanel::bottom("timeline").exact_height(64.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(egui::Margin::symmetric(14, 8))).show(ctx, |ui| {
+    let frame = egui::Frame::new().fill(super::PANEL).inner_margin(egui::Margin::symmetric(14, 8)).stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(24, 30, 44)));
+    egui::TopBottomPanel::bottom("timeline").exact_height(62.0).frame(frame).show(ctx, |ui| {
         ui.horizontal_centered(|ui| {
-            let play = if sim.paused { "▶" } else { "⏸" };
-            if ui.add_sized([36.0, 32.0], egui::Button::new(egui::RichText::new(play).size(18.0))).on_hover_text("Pause / resume (Space)").clicked() {
+            // Play / pause.
+            let (glyph, tip) = if sim.paused { (icon::PLAY, "Resume (Space)") } else { (icon::PAUSE, "Pause (Space)") };
+            let play = egui::Button::new(egui::RichText::new(glyph).size(20.0).color(egui::Color32::from_rgb(20, 16, 8))).fill(ACCENT).corner_radius(20).min_size(egui::vec2(40.0, 40.0));
+            if ui.add(play).on_hover_text(tip).clicked() {
                 sim.paused = !sim.paused;
             }
-            if ui.add_sized([28.0, 32.0], egui::Button::new("−")).on_hover_text("Slower (,)").clicked() {
-                sim.speed = sim.speed.saturating_sub(1);
-            }
+            ui.add_space(6.0);
+            // Speed: a stepped slider over every available rate.
             ui.vertical(|ui| {
-                ui.set_width(118.0);
-                ui.label(egui::RichText::new(SPEEDS[sim.speed].label).strong().color(ACCENT));
-                let requested = sim.rate();
-                if !sim.paused && sim.effective_rate > 0.0 && sim.effective_rate < requested * 0.7 {
-                    ui.label(egui::RichText::new(format!("CPU-limited: {}/s", format_duration(sim.effective_rate))).size(10.5).color(MUTED))
-                        .on_hover_text("Every step is computed — gravity, climate, every civilization year — and none is skipped to go faster. It is running as fast as this computer allows.");
-                } else {
-                    ui.label(egui::RichText::new(if sim.paused { "paused" } else { "running" }).size(10.5).color(MUTED));
+                ui.set_width(210.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(icon::GAUGE).color(MUTED));
+                    ui.label(egui::RichText::new(SPEEDS[sim.speed].label).color(ACCENT).size(13.0));
+                    let requested = sim.rate();
+                    if !sim.paused && sim.effective_rate > 0.0 && sim.effective_rate < requested * 0.7 {
+                        ui.label(egui::RichText::new(format!("{} CPU-limited · {}/s", icon::WARNING, format_duration(sim.effective_rate))).size(10.0).color(MUTED))
+                            .on_hover_text("Every step is computed — gravity, climate, every civilization year — and none is skipped to go faster. It is running as fast as this computer allows.");
+                    }
+                });
+                let mut idx = sim.speed as f32;
+                let max = (SPEEDS.len() - 1) as f32;
+                ui.spacing_mut().slider_width = 196.0;
+                let slider = egui::Slider::new(&mut idx, 0.0..=max).step_by(1.0).show_value(false).trailing_fill(true);
+                if ui.add(slider).on_hover_text("Simulation speed (, and . keys)").changed() {
+                    sim.speed = idx.round() as usize;
                 }
             });
-            if ui.add_sized([28.0, 32.0], egui::Button::new("+")).on_hover_text("Faster (.)").clicked() {
-                sim.speed = (sim.speed + 1).min(SPEEDS.len() - 1);
-            }
+            ui.add_space(10.0);
             ui.separator();
             ui.vertical(|ui| {
                 let u = &sim.universe;
                 // Human-scale speeds get a calendar clock; geological ones a year count.
                 let clock = if u.gregorian() && sim.rate() < 1000.0 * cosmogon_sim::time::SECONDS_PER_YEAR { cosmogon_sim::time::format_datetime(u.time) } else { u.date_label() };
-                ui.label(egui::RichText::new(clock).size(17.0).strong());
+                ui.label(egui::RichText::new(clock).size(17.0).color(TEXT));
                 let dynamic = rig.focus.map(|f| u.system(f.system()).is_dynamic()).unwrap_or(false);
                 let model = if dynamic { "N-body gravity" } else { "Kepler orbits" };
                 ui.label(egui::RichText::new(format!("{} elapsed · {model}", format_duration(u.time - u.start_time))).size(10.5).color(MUTED));
             });
             ui.separator();
-            ui.checkbox(&mut settings.auto_slow, "").on_hover_text("Slow down automatically for milestones");
-            ui.label(egui::RichText::new("auto-slow").size(11.0).color(MUTED));
+            ui.checkbox(&mut settings.auto_slow, egui::RichText::new("auto-slow").size(11.0).color(MUTED)).on_hover_text("Slow down automatically for milestones");
             ui.separator();
             // Recent notable events.
             let events: Vec<_> = sim.universe.history.events.iter().rev().filter(|e| e.importance >= 4).take(3).cloned().collect();
@@ -203,9 +228,10 @@ pub fn bottom_bar(mut contexts: EguiContexts, ui_state: Res<UiState>, mut sim: R
                     let color = match e.category {
                         cosmogon_sim::history::Category::Life => LIFE,
                         cosmogon_sim::history::Category::Technology | cosmogon_sim::history::Category::Civilization => CIV,
+                        cosmogon_sim::history::Category::Disaster | cosmogon_sim::history::Category::War => super::DANGER,
                         _ => TEXT,
                     };
-                    let text = egui::RichText::new(format!("{} — {}", cosmogon_sim::time::format_date(e.time, sim.universe.start_time, sim.universe.gregorian()), e.title)).size(11.5).color(color);
+                    let text = egui::RichText::new(format!("{}  {}", cosmogon_sim::time::format_date(e.time, sim.universe.start_time, sim.universe.gregorian()), e.title)).size(11.5).color(color);
                     if ui.add(egui::Label::new(text).sense(egui::Sense::click()).truncate()).on_hover_text(&e.detail).clicked() {
                         if let (Some(s), Some(b)) = (e.system, e.body) {
                             let t = Target::Body(cosmogon_sim::BodyRef { system: s, body: b });

@@ -15,6 +15,7 @@ cosmogon_sim = { workspace = true }
 cosmogon_physics = { workspace = true }
 bevy = { version = "0.18.1", features = ["3d", "default_font", "png", "tonemapping_luts", "zstd_rust"] }
 bevy_egui = "0.39"
+egui-phosphor = "0.11"
 serde = { workspace = true }
 toml = { workspace = true }
 serde_json = { workspace = true }

@@ -78,6 +78,8 @@ pub struct PredictionJob {
     pub subject: Option<BodyRef>,
     pub result: Option<(Option<BodyRef>, Prediction)>,
     pub started_at: f64,
+    /// System of the newest projectile prediction (throw tool).
+    pub system: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,6 +109,16 @@ pub enum Tool {
     #[default]
     Select,
     Launch(LaunchSpec),
+    /// Press in space to place an object, drag to give it velocity, release to throw.
+    Throw(ThrowSpec),
+    /// Drag an existing object to a new place (it keeps its velocity).
+    Grab,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThrowSpec {
+    /// Creator preset id (`sandbox::PRESETS`).
+    pub preset: &'static str,
 }
 
 #[derive(Resource)]
@@ -163,7 +175,7 @@ impl Sim {
             undo: Vec::new(),
             redo: Vec::new(),
             dirty: false,
-            prediction: PredictionJob { task: None, subject: None, result: None, started_at: -10.0 },
+            prediction: PredictionJob { task: None, subject: None, result: None, started_at: -10.0, system: 0 },
             tool: Tool::Select,
             generation: 0,
             thumbnail_request,
@@ -250,7 +262,7 @@ impl Sim {
         self.dirty = true;
         self.generation += 1;
         self.seen_events = self.universe.history.events.len();
-        self.prediction = PredictionJob { task: None, subject: None, result: None, started_at: -10.0 };
+        self.prediction = PredictionJob { task: None, subject: None, result: None, started_at: -10.0, system: 0 };
         if let Some(Target::Body(r)) = self.selected {
             if !self.universe.systems.get(r.system as usize).is_some_and(|s| s.bodies.get(r.body as usize).is_some_and(|b| b.exists())) {
                 self.selected = Some(Target::Star(r.system));
@@ -303,6 +315,16 @@ impl Sim {
         self.prediction.subject = subject;
         self.prediction.started_at = now;
         self.prediction.task = Some(AsyncComputeTaskPool::get().spawn(async move { sys.predict(t, extra, horizon, 600, 30_000) }));
+    }
+
+    /// Predict the path of a not-yet-created object in `system` (throw tool preview).
+    pub fn request_projectile_prediction(&mut self, system: u32, extra: Particle, horizon: f64, now: f64) {
+        let sys = self.universe.system(system).clone();
+        let t = self.universe.time;
+        self.prediction.subject = None;
+        self.prediction.system = system;
+        self.prediction.started_at = now;
+        self.prediction.task = Some(AsyncComputeTaskPool::get().spawn(async move { sys.predict(t, Some(extra), horizon, 400, 12_000) }));
     }
 
     pub fn launch_target(&self) -> Option<BodyRef> {
@@ -564,8 +586,8 @@ fn poll_prediction(mut sim: ResMut<Sim>, time: Res<Time>) {
         }
         return;
     }
-    if matches!(sim.tool, Tool::Launch(_)) {
-        return; // the launch tool requests its own predictions
+    if matches!(sim.tool, Tool::Launch(_) | Tool::Throw(_)) {
+        return; // these tools request their own predictions
     }
     let Some(Target::Body(r)) = sim.selected else {
         sim.prediction.result = None;
