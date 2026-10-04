@@ -386,6 +386,18 @@ pub fn draw_markers(
         }
     }
 
+    // Star-forming nebulae, named from afar.
+    for n in &u.nurseries {
+        let c = to_render(n.position);
+        let dist = (c - view.origin).length();
+        if labels && dist > n.radius_ly * cosmogon_sim::astro::LIGHT_YEAR * 3.0 {
+            if let Some(sp) = project(c) {
+                let state = if n.active() { format!("stellar nursery · {} new stars", n.formed) } else { "young cluster".into() };
+                label(&painter, sp, &format!("{} · {state}", n.name), egui::Color32::from_rgb(255, 150, 175), &small);
+            }
+        }
+    }
+
     // Generation ships between the stars.
     for sh in u.starships.iter().filter(|s| !s.arrived) {
         let a = to_render(u.systems[sh.from as usize].position);

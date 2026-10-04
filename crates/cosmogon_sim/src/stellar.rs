@@ -137,6 +137,7 @@ impl Universe {
                 next = next.min(b.time + (sys.position - origin).length() / SPEED_OF_LIGHT);
             }
         }
+        next = next.min(self.next_nursery_time());
         let now = self.scheduler.index_at_or_after(TASK_STARS, self.time);
         if !next.is_finite() {
             return u64::MAX / 4;
@@ -146,6 +147,7 @@ impl Universe {
 
     /// Run at the stellar task's step `k` (time `t`). Returns the next step index.
     pub(crate) fn step_stars(&mut self, t: f64, k: u64) -> u64 {
+        self.step_nurseries(t);
         for s in 0..self.systems.len() {
             let star = &self.systems[s].star;
             if star.kind != StarKind::Normal {

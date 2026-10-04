@@ -1291,7 +1291,9 @@ mod tests {
     fn lab_starts_from_real_data_today() {
         let u = lab();
         assert!(u.system(0).is_dynamic());
-        assert_eq!(u.systems.len(), 1, "no procedural neighbours in a real-data template");
+        // No procedural neighbours in a real-data template: besides the Sun, only the real
+        // Trapezium stars of the Orion Nebula, without invented planets.
+        assert!(u.systems[1..].iter().all(|s| s.bodies.is_empty() && s.star.name.starts_with("Theta1 Orionis")), "only catalogued stars besides the Sun");
         assert!((u.time / SECONDS_PER_YEAR - 26.0).abs() < 0.01);
         let e = earth(&u);
         assert!(u.biosphere(e).unwrap().vegetated());

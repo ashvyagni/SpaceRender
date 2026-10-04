@@ -13,6 +13,7 @@ pub mod bake;
 pub mod comets;
 pub mod galaxy;
 pub mod impacts;
+pub mod nurseries;
 pub mod look;
 pub mod materials;
 pub mod overlays;
@@ -159,11 +160,12 @@ impl Plugin for RenderPlugin {
             .add_plugins(galaxy::GalaxyPlugin)
             .add_plugins(comets::CometPlugin)
             .add_plugins(impacts::ImpactFlashPlugin)
+            .add_plugins(nurseries::NurseryPlugin)
             .add_systems(
                 Update,
                 (
                     (stellar::sync_primaries, stellar::update_star_sizes).chain().in_set(Frame::Positions),
-                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae, galaxy::update_galaxies, comets::sync_comets, impacts::update_impact_flashes).chain().in_set(Frame::Apply).after(apply_origin),
+                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae, galaxy::update_galaxies, comets::sync_comets, impacts::update_impact_flashes, nurseries::sync_nurseries).chain().in_set(Frame::Apply).after(apply_origin),
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             );

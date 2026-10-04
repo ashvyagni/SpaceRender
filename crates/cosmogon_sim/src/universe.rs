@@ -179,6 +179,9 @@ pub struct Universe {
     /// Generation ships between the stars.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub starships: Vec<crate::expansion::Starship>,
+    /// Star-forming clouds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nurseries: Vec<crate::nursery::Nursery>,
 }
 
 fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
@@ -246,6 +249,7 @@ impl Universe {
             edits: Vec::new(),
             blasts: Vec::new(),
             starships: Vec::new(),
+            nurseries: Vec::new(),
         };
         let prehistory_events = u.run_prehistory(&mut biospheres);
         u.biospheres = biospheres;
@@ -272,6 +276,7 @@ impl Universe {
                 if settings.systems.civilization {
                     u.seed_present_humanity();
                 }
+                u.add_orion_nebula();
             }
             Scenario::Neighbourhood | Scenario::StarSystem | Scenario::EmptySystem => {}
         }

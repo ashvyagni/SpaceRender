@@ -29,6 +29,7 @@ pub mod intervene;
 pub mod life;
 pub mod names;
 pub mod noise;
+pub mod nursery;
 pub mod params;
 pub mod planet;
 pub mod present_day;
