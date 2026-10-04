@@ -801,6 +801,9 @@ fn glance(ui: &mut egui::Ui, u: &Universe, c: &Civilization) {
                 ("Stations", "stations", "Orbital stations and industry"),
                 ("Colonies", "colonies", "Self-sustaining settlements on other worlds"),
                 ("Stars", "probes", "Interstellar probes"),
+                ("Terraform", "terraform", "Terraforming colony worlds"),
+                ("Dyson", "dyson", "A Dyson swarm around the home star"),
+                ("Arks", "starships", "Generation ships to other stars"),
             ] {
                 let on = c.flags.contains(flag);
                 let text = if on { egui::RichText::new(label).size(11.5).strong().color(CIV) } else { egui::RichText::new(label).size(11.5).color(MUTED.gamma_multiply(0.6)) };
@@ -865,7 +868,10 @@ fn glance(ui: &mut egui::Ui, u: &Universe, c: &Civilization) {
 
 /// Satellites, missions in flight, the exploration record and colonies.
 fn space_programme(ui: &mut egui::Ui, u: &Universe, c: &Civilization) {
-    if c.satellites == 0 && c.explored.is_empty() && c.missions.is_empty() && c.colonies.is_empty() {
+    let ci = u.civs.iter().position(|x| std::ptr::eq(x, c)).unwrap_or(usize::MAX) as u32;
+    let arks: Vec<_> = u.starships.iter().filter(|s| s.civ == ci).collect();
+    let branches: Vec<_> = u.civs.iter().filter(|x| x.parent == Some(ci)).collect();
+    if c.satellites == 0 && c.explored.is_empty() && c.missions.is_empty() && c.colonies.is_empty() && c.dyson <= 0.0 && arks.is_empty() && c.parent.is_none() {
         return;
     }
     let sys = u.system(c.system);
@@ -884,6 +890,27 @@ fn space_programme(ui: &mut egui::Ui, u: &Universe, c: &Civilization) {
             let p = m.progress(u.time);
             bar(ui, &format!("{} → {}", m.name, name(m.body)), p, if m.kind == cosmogon_sim::civ::space::MissionKind::Colony { CIV } else { egui::Color32::from_rgb(140, 210, 255) }, &format!("{} · arrives {}", m.kind.label(), format_date(m.arrives, u.start_time, u.gregorian())));
         }
+    }
+    if c.dyson > 0.0 {
+        let star = &u.system(c.system).star.name;
+        bar(ui, "Dyson swarm", c.dyson / 0.9, ACCENT, &format!("{:.0}% of {star}'s light captured · {}", c.dyson * 100.0, power(c.dyson_power_w)));
+    }
+    if let Some(p) = c.parent.and_then(|p| u.civs.get(p as usize)) {
+        ui.label(egui::RichText::new(format!("Founded by settlers from {} ({})", p.name, u.system(p.system).name)).size(11.5).color(CIV));
+    }
+    if !arks.is_empty() {
+        ui.label(egui::RichText::new("Generation ships").size(11.5).color(MUTED));
+        for s in &arks {
+            let dest = format!("{} · {}", u.body(s.to).name, u.system(s.to.system).star.name);
+            if s.arrived {
+                ui.label(egui::RichText::new(format!("{} — arrived at {dest}", s.name)).size(11.5));
+            } else {
+                bar(ui, &format!("{} → {dest}", s.name), s.progress(u), CIV, &format!("{} settlers · launched {}", compact(s.settlers), format_date(s.launched, u.start_time, u.gregorian())));
+            }
+        }
+    }
+    for b in &branches {
+        ui.label(egui::RichText::new(format!("Branch: {} on {} — {}", b.name, u.body(BodyRef { system: b.system, body: b.body }).name, status_label(b))).size(11.5).color(CIV));
     }
     if !c.explored.is_empty() {
         ui.label(egui::RichText::new("Worlds visited").size(11.5).color(MUTED));

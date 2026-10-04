@@ -21,6 +21,7 @@
 pub mod astro;
 pub mod civ;
 pub mod collision;
+pub mod expansion;
 pub mod habitability;
 pub mod history;
 pub mod impact;

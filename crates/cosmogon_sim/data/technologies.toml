@@ -681,6 +681,16 @@ unlocks = ["colonies"]
 description = "Self-sustaining settlements on other worlds of the home system."
 
 [[tech]]
+id = "terraforming"
+name = "Terraforming"
+era = "Interplanetary"
+domain = "Biology"
+years = 200
+requires = ["tech:interplanetary_colonies", "k:Biology>=120000000", "k:Engineering>=150000000"]
+unlocks = ["terraform"]
+description = "Reshaping whole worlds: thick air from imported nitrogen and oxygen, water from comets. Takes centuries."
+
+[[tech]]
 id = "interstellar_probes"
 name = "Interstellar probes"
 era = "Interstellar"
@@ -690,3 +700,25 @@ requires = ["tech:fusion_power", "tech:interplanetary_colonies", "k:Physics>=300
 demand = "contact"
 unlocks = ["probes"]
 description = "Robotic emissaries to other stars at a few percent of light speed. No faster-than-light travel exists in this universe."
+
+[[tech]]
+id = "dyson_swarm"
+name = "Dyson swarm"
+era = "Interstellar"
+domain = "Engineering"
+years = 400
+requires = ["tech:fusion_power", "tech:space_infrastructure", "k:Engineering>=400000000", "k:Materials>=300000000"]
+demand = "energy"
+unlocks = ["dyson"]
+description = "Countless solar collectors orbiting the star, built from dismantled asteroids: most of a sun's power, harnessed. Kardashev type II."
+
+[[tech]]
+id = "generation_ships"
+name = "Generation ships"
+era = "Interstellar"
+domain = "Biology"
+years = 300
+requires = ["tech:interstellar_probes", "tech:interplanetary_colonies", "k:Biology>=300000000"]
+demand = "contact"
+unlocks = ["starships"]
+description = "Self-contained worlds that cross the gulf between stars over centuries; the people who arrive are the descendants of those who left."

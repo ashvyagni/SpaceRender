@@ -193,6 +193,17 @@ pub struct Civilization {
     pub colony_timer: f64,
     #[serde(default)]
     pub probe_timer: f64,
+    #[serde(default)]
+    pub starship_timer: f64,
+    /// Fraction of the star's output captured by a Dyson swarm (0..0.9).
+    #[serde(default)]
+    pub dyson: f64,
+    /// Power harvested by the swarm (W).
+    #[serde(default)]
+    pub dyson_power_w: f64,
+    /// The civilization whose generation ship founded this one.
+    #[serde(default)]
+    pub parent: Option<u32>,
     /// Spacecraft in flight within the home system.
     #[serde(default)]
     pub missions: Vec<space::Mission>,
@@ -335,6 +346,10 @@ impl Civilization {
             settlement_timer: 10.0,
             colony_timer: 0.0,
             probe_timer: 0.0,
+            starship_timer: 0.0,
+            dyson: 0.0,
+            dyson_power_w: 0.0,
+            parent: None,
             missions: Vec::new(),
             explored: Vec::new(),
             missions_launched: 0,
@@ -377,7 +392,7 @@ impl Civilization {
     }
 
     pub fn total_power_w(&self) -> f64 {
-        self.population * self.energy_per_capita * (1.0 - self.energy_shortfall)
+        self.population * self.energy_per_capita * (1.0 - self.energy_shortfall) + self.dyson_power_w
     }
 
     /// Artificial light output at night (arbitrary units: 0 = none, ~1 = modern Earth).

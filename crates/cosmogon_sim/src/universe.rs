@@ -153,7 +153,7 @@ pub struct AdvanceReport {
 }
 
 const TASK_BIOSPHERE: usize = 0;
-const TASK_CIV: usize = 1;
+pub(crate) const TASK_CIV: usize = 1;
 /// Orbit → climate refresh for dynamic systems (added when the first system becomes dynamic).
 pub(crate) const TASK_ENV: usize = 2;
 
@@ -176,6 +176,9 @@ pub struct Universe {
     /// Supernova radiation fronts still travelling between the stars.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blasts: Vec<crate::stellar::Blast>,
+    /// Generation ships between the stars.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub starships: Vec<crate::expansion::Starship>,
 }
 
 fn life_mult(s: &UniverseSettings) -> LifeMultipliers {
@@ -242,6 +245,7 @@ impl Universe {
             scheduler: Scheduler::default(),
             edits: Vec::new(),
             blasts: Vec::new(),
+            starships: Vec::new(),
         };
         let prehistory_events = u.run_prehistory(&mut biospheres);
         u.biospheres = biospheres;
@@ -692,6 +696,7 @@ impl Universe {
             let mut rng = Rng::stream(seed, domain::CIV_STEP, &[ci as u64, k]);
             let body = &mut self.systems[s].bodies[b];
             let events = self.civs[ci].step(body, &world, graph, t, dt, &mut rng);
+            self.step_megastructures(ci, t, dt);
             let stride = self.civs[ci].choose_stride(t);
             self.civs[ci].stride_years = stride;
             self.civs[ci].next_k = k + stride as u64;
@@ -708,6 +713,7 @@ impl Universe {
         }
         self.step_contact(t);
         self.step_probes(t);
+        self.step_starships(t);
         // Next due civilization; with none alive, sleep until the next biosphere step (the
         // only place a new one can appear).
         match self.civs.iter().filter(|c| c.is_alive()).map(|c| c.next_k).min() {

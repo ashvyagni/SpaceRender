@@ -34,8 +34,33 @@ pub const POWER_W: f64 = 19.5e12;
 pub const SATELLITES: u32 = 11_000;
 pub const PEAK_POPULATION: f64 = 10.3e9;
 
-/// Technologies not yet achieved in 2026.
+/// Technologies not yet achieved in 2026. Anything that depends on one of them (directly
+/// or through other technologies) is not achieved either — see [`ahead_of_today`].
 const AHEAD: [&str; 5] = ["space_infrastructure", "fusion_power", "artificial_intelligence", "interplanetary_colonies", "interstellar_probes"];
+
+/// Per technology: still in the future in 2026.
+pub fn ahead_of_today(graph: &TechGraph) -> Vec<bool> {
+    let mut ahead: Vec<bool> = graph.techs.iter().map(|x| AHEAD.contains(&x.id.as_str())).collect();
+    let tech_deps = |conds: &[Condition]| conds.iter().filter_map(|c| if let Condition::Tech(i) = c { Some(*i) } else { None }).collect::<Vec<_>>();
+    loop {
+        let mut changed = false;
+        for (i, tech) in graph.techs.iter().enumerate() {
+            if ahead[i] {
+                continue;
+            }
+            let needs_future = tech_deps(&tech.requires).iter().any(|&d| ahead[d]);
+            // With alternative routes, it is in the future only if every route needs the future.
+            let routes_blocked = !tech.routes.is_empty() && tech.routes.iter().all(|r| tech_deps(&r.requires).iter().any(|&d| ahead[d]));
+            if needs_future || routes_blocked {
+                ahead[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return ahead;
+        }
+    }
+}
 
 #[derive(Deserialize)]
 struct CityFile {
@@ -110,7 +135,8 @@ impl Universe {
         // Technology and the knowledge it implies.
         let graph = TechGraph::embedded();
         let mut need = [0.0f64; crate::civ::knowledge::N_DOMAINS];
-        for tech in graph.techs.iter().filter(|x| !AHEAD.contains(&x.id.as_str())) {
+        let ahead = ahead_of_today(graph);
+        for tech in graph.techs.iter().enumerate().filter(|(i, _)| !ahead[*i]).map(|(_, x)| x) {
             let conds = tech.requires.iter().chain(tech.routes.first().map(|r| r.requires.iter()).into_iter().flatten());
             for c in conds {
                 if let Condition::Knowledge(d, v) = c {
@@ -267,6 +293,10 @@ mod tests {
         let c = u.civs.iter().find(|c| c.name == "Humanity").expect("humanity");
         assert!((c.population - 8.23e9).abs() < 1e7);
         assert!(c.knows("moon_landing") && c.knows("spaceflight") && !c.knows("fusion_power"));
+        // Nothing that builds on future technology leaks into 2026.
+        for id in ["terraforming", "dyson_swarm", "generation_ships"] {
+            assert!(!c.knows(id), "{id} is not a 2026 technology");
+        }
         let k = c.kardashev();
         assert!((0.70..0.76).contains(&k), "Kardashev {k}");
         assert!(c.sites.iter().any(|s| s.name == "Tokyo"));

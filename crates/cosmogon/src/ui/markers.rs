@@ -386,6 +386,48 @@ pub fn draw_markers(
         }
     }
 
+    // Generation ships between the stars.
+    for sh in u.starships.iter().filter(|s| !s.arrived) {
+        let a = to_render(u.systems[sh.from as usize].position);
+        let b = to_render(u.systems[sh.to.system as usize].position);
+        if let Some(sp) = project(a.lerp(b, sh.progress(u))) {
+            painter.circle_filled(sp, 3.0, CIV);
+            painter.circle_stroke(sp, 5.5, egui::Stroke::new(1.0_f32, CIV.gamma_multiply(0.5)));
+            label(&painter, sp, &sh.name, CIV, &small);
+        }
+    }
+
+    // Dyson swarms: collectors on inclined orbits well inside the home world's orbit,
+    // glinting gold where sunlit. Drawn when the system is near.
+    for c in u.civs.iter().filter(|c| c.is_alive() && c.dyson > 0.0 && !ui_state.hidden) {
+        let sys = u.system(c.system);
+        let star = to_render(sys.star_position(t));
+        let home_a = (sys.body_local_position(sys.top_level(c.body as usize), t) - sys.star_local_position(t)).length();
+        if (star - view.origin).length() > 400.0 * cosmogon_sim::astro::AU {
+            continue;
+        }
+        let n = (c.dyson * 3000.0) as u64;
+        let mu = sys.star.mu();
+        for k in 0..n {
+            let h = cosmogon_sim::rng::mix(c.id as u64 * 104_729 + 7, k);
+            let fr = |s: u32| ((h >> s) & 0xFFFF) as f64 / 65535.0;
+            let r = home_a * (0.3 + 0.2 * fr(0));
+            let period = std::f64::consts::TAU * (r * r * r / mu.max(1.0)).sqrt();
+            let ang = fr(16) * std::f64::consts::TAU + (t / period).fract() * std::f64::consts::TAU;
+            let inc = (fr(32) - 0.5) * 2.6;
+            let node = fr(48) * std::f64::consts::TAU;
+            let p0 = DVec3::new(ang.cos(), ang.sin(), 0.0);
+            let p1 = DVec3::new(p0.x, p0.y * inc.cos(), p0.y * inc.sin());
+            let p2 = DVec3::new(p1.x * node.cos() - p1.y * node.sin(), p1.x * node.sin() + p1.y * node.cos(), p1.z);
+            let wp = star + p2 * r;
+            if let Some(sp) = project(wp) {
+                // Collectors facing the camera's side of the star glint brighter.
+                let lit = 0.45 + 0.55 * (-(wp - star).normalize().dot((view.origin - star).normalize())).mul_add(-0.5, 0.5);
+                painter.circle_filled(sp, 1.3, egui::Color32::from_rgba_unmultiplied(255, 200, 110, (lit * 220.0) as u8));
+            }
+        }
+    }
+
     // Interstellar probes.
     for p in u.probes.iter().filter(|p| !p.arrived) {
         if let Some(sp) = project(to_render(p.position(&u.systems, t))) {

@@ -1121,6 +1121,7 @@ pub const WHAT_IFS: &[WhatIf] = &[
     WhatIf { id: "feeding_black_hole", title: "What if a black hole orbited the Sun?", description: "A 10 M☉ black hole feeding on gas circles at 30 AU, its disk blazing — and Neptune's orbit is in its way." },
     WhatIf { id: "theia", title: "What if Theia struck Earth again?", description: "A Mars-sized world grazes Earth at 10 km/s — the giant impact thought to have made the Moon. Earth melts; debris fills the sky." },
     WhatIf { id: "halley", title: "What if Halley's Comet came back now?", description: "Comet 1P/Halley, a month before perihelion on its real retrograde orbit: watch its ion and dust tails grow as it swings past the Sun." },
+    WhatIf { id: "kardashev_two", title: "What if humanity became a Kardashev II civilization?", description: "Skip ahead to a humanity that has mastered fusion, settled Mars and wrapped the Sun in a Dyson swarm harvesting nearly half its light — and is terraforming Mars." },
     WhatIf { id: "second_sun", title: "What if a second sun arrived?", description: "A Sun-like star approaches from 300 AU. Will the planets stay with their star — or follow the newcomer?" },
 ];
 
@@ -1240,6 +1241,21 @@ pub fn apply_what_if(u: &mut Universe, id: &str) -> Result<(), String> {
             let (pos, vel) = orbit.state(mu, mu + G * body.mass, t);
             let state = State { pos: sys.star_local_position(t) + pos, vel };
             u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "kardashev_two" => {
+            let ci = u.civs.iter().position(|c| c.is_alive() && c.system == 0).ok_or("no civilization in the Solar System")?;
+            let mars = find(u, "Mars")?;
+            let graph = crate::civ::tech::TechGraph::embedded();
+            let lum = u.systems[0].star.luminosity(t) * cosmogon_core::constants::SOLAR_LUMINOSITY;
+            let c = &mut u.civs[ci];
+            for id in ["space_infrastructure", "fusion_power", "artificial_intelligence", "interplanetary_colonies", "terraforming", "dyson_swarm"] {
+                c.grant(graph, id, t);
+            }
+            if !c.colonies.iter().any(|x| x.body == mars.body) {
+                c.colonies.push(crate::civ::Colony { body: mars.body, founded: t, population: 2.0e6 });
+            }
+            c.dyson = 0.45;
+            c.dyson_power_w = 0.45 * lum;
         }
         "sun_red_giant" => {
             let s = &u.system(0).star;
