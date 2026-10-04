@@ -10,6 +10,7 @@
 //! (Bevy): +Y up. Mapping: render = (x, z, -y).
 
 pub mod bake;
+pub mod galaxy;
 pub mod look;
 pub mod materials;
 pub mod overlays;
@@ -153,11 +154,12 @@ impl Plugin for RenderPlugin {
             )
             .add_plugins(overlays::OverlayPlugin)
             .add_plugins(stellar::StellarPlugin)
+            .add_plugins(galaxy::GalaxyPlugin)
             .add_systems(
                 Update,
                 (
                     (stellar::sync_primaries, stellar::update_star_sizes).chain().in_set(Frame::Positions),
-                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae).chain().in_set(Frame::Apply).after(apply_origin),
+                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae, galaxy::update_galaxies).chain().in_set(Frame::Apply).after(apply_origin),
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             );
@@ -529,10 +531,13 @@ fn spawn_universe(
     mut hole_mats: ResMut<Assets<stellar::BlackHoleMaterial>>,
     mut beam_mats: ResMut<Assets<stellar::BeamMaterial>>,
     mut spawned: ResMut<SpawnedBodies>,
+    mut gal_mats: ResMut<Assets<galaxy::GalaxyMaterial>>,
+    mut deep_mats: ResMut<Assets<galaxy::DeepFieldMaterial>>,
 ) {
     let u = &sim.universe;
     let t = u.time;
     spawned.0.clear();
+    galaxy::spawn_galaxies(&mut commands, &shared, &mut meshes, &mut gal_mats, &mut deep_mats);
     for sys in &u.systems {
         let stars = std::iter::once((&sys.star, false)).chain(sys.companion.as_ref().map(|c| (&c.star, true)));
         for (star, companion) in stars {

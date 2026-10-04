@@ -44,11 +44,14 @@ pub struct CameraRig {
     pub ground_radius: f64,
     transition: Option<Transition>,
     pub applied_args: bool,
+    /// Offset of the orbit pivot from the target: zoomed far out, the camera swings round the
+    /// Galactic Centre instead of the focused star.
+    pub pivot_shift: DVec3,
 }
 
 impl Default for CameraRig {
     fn default() -> Self {
-        Self { focus: None, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false }
+        Self { focus: None, target_pos: DVec3::ZERO, distance: 3.0e7, desired_distance: 3.0e7, yaw: 0.6, pitch: 0.35, focus_radius: 6.4e6, ground_radius: 6.4e6, transition: None, applied_args: false, pivot_shift: DVec3::ZERO }
     }
 }
 
@@ -68,7 +71,7 @@ impl CameraRig {
     pub fn eye(&self) -> DVec3 {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
-        self.target_pos + DVec3::new(cp * sy, sp, cp * cy) * self.distance
+        self.target_pos + self.pivot_shift + DVec3::new(cp * sy, sp, cp * cy) * self.distance
     }
 }
 
@@ -111,7 +114,7 @@ fn spawn_camera(mut commands: Commands, sky: Res<SkyHandle>, settings: Res<UserS
         Tonemapping::AgX,
         Bloom { intensity: if settings.graphics.bloom() { 0.22 } else { 0.0 }, ..Bloom::NATURAL },
         msaa_for(&settings),
-        Projection::Perspective(PerspectiveProjection { fov: 50f32.to_radians(), near: 1.0, far: 1.0e22, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: 50f32.to_radians(), near: 1.0, far: 1.0e27, ..default() }),
         Skybox { image: sky.0.clone(), brightness: 300.0, ..default() },
         Transform::default(),
         MainCamera,
@@ -307,7 +310,7 @@ fn update_camera(
         Target::Star(_) => radius * 1.5,
         Target::Body(_) => rig.ground_radius + 60.0,
     };
-    rig.desired_distance = rig.desired_distance.clamp(min_d, 60.0 * LIGHT_YEAR);
+    rig.desired_distance = rig.desired_distance.clamp(min_d, 1.5e10 * LIGHT_YEAR);
 
     if let Some(tr) = rig.transition.as_mut() {
         tr.elapsed += dt;
@@ -332,6 +335,14 @@ fn update_camera(
         rig.distance = (rig.distance.ln() + (rig.desired_distance.ln() - rig.distance.ln()) * k).exp();
     }
 
+    // Past a few thousand light-years, ease the pivot over to the Galactic Centre so pulling
+    // back from any star frames the whole Milky Way.
+    let sun = to_render(sim.universe.systems[0].star_position(sim.universe.time));
+    let gc = sun + to_render(crate::render::galaxy::galactic_centre_offset() * LIGHT_YEAR);
+    let w = ((rig.distance / LIGHT_YEAR / 4_000.0).ln() / (60_000f64 / 4_000.0).ln()).clamp(0.0, 1.0);
+    let w = w * w * (3.0 - 2.0 * w);
+    rig.pivot_shift = (gc - rig.target_pos) * w;
+
     let eye = rig.eye();
     view.origin = eye;
     if let Ok(w) = windows.single() {
@@ -344,8 +355,9 @@ fn update_camera(
         let fill = ((rig.distance / radius - 1.0) / 4.0).clamp(0.0, 1.0) as f32;
         bloom.intensity = 0.03 + 0.19 * fill;
     }
-    let look = (rig.target_pos - eye).as_vec3();
-    *tf = Transform::IDENTITY.looking_to(look.normalize_or(Vec3::NEG_Z), Vec3::Y);
+    // Normalise in f64: squaring galaxy-scale offsets (~1e21 m) overflows f32.
+    let look = (rig.target_pos + rig.pivot_shift - eye).normalize_or(DVec3::NEG_Z).as_vec3();
+    *tf = Transform::IDENTITY.looking_to(look, Vec3::Y);
     let altitude = (rig.distance - rig.ground_radius).max(1.0);
     if matches!(focus, Target::Body(_)) {
         // Near the ground, tilt the view from "straight down" towards the horizon.
