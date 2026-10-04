@@ -13,12 +13,13 @@ the audit [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) and the S1 status [docs/M
 | S1 | Sandbox foundation: home & sandbox documents, JPL data, object schema & provenance, creator, editable inspector, N-body, launch, prediction, collisions, undo/redo, physics tests, orbit → climate | ✅ 0.4.0 |
 | **G1** | **Graphics upgrade** (requested next): every planet as detailed close up as Earth, Moon and Mars — gas-giant banding and storms, Venus/Titan hazes, icy-moon terrain, Mercury/Io/Callisto surfaces from real global mosaics where licensable; atmospheric scattering, ocean shading, volumetric clouds, rings with shadows, eclipses | ✅ 0.5.0 ([details](docs/MILESTONE_G1_C1.md)) |
 | **C1** | **Civilization visibility** (requested next): progress & technology at a glance on habitable worlds, visible cities and infrastructure, satellites and spacecraft as objects, colonies on other planets, exploration of the system and beyond; player interventions that respect the simulation | ✅ 0.5.0 ([details](docs/MILESTONE_G1_C1.md)) |
+| **1.0** | **The whole universe**: stellar life and death, compact objects with lensing, star formation, galaxy layer, disruption physics, throw/grab, comets, civilizations across the stars, interface overhaul, tours, timeline, photo mode, sound | ✅ 1.0.0 ([plan](docs/PRODUCT_PLAN_1_0.md)) |
 | S2 | Physical consequence pipeline: seasons and eccentric insolation, thermal inertia, sea level, migration, economic response; present-day humanity in the Lab | ⬜ |
-| S3 | Solar System expansion: JPL small bodies, comet tails, atmospheric entry, fragmentation, tides, Roche disruption, Hill/SOI/Lagrange overlays, drag-to-launch | ⬜ |
+| S3 | Solar System expansion: JPL small bodies, comet tails, atmospheric entry, fragmentation, tides, Roche disruption, Hill/SOI/Lagrange overlays, drag-to-launch | 🟡 1.0.0: comet tails, fragmentation, Roche rings, drag-to-throw |
 | S4 | Real-universe data platform (ingestion, spatial index, streaming, dataset versions UI) | ⬜ |
-| S5 | Universe exploration (Gaia stars, known exoplanets, galaxy layer, search) | ⬜ |
-| S6 | Exotic objects (white dwarfs, neutron stars, black holes, lensing, stellar evolution) | ⬜ |
-| S7 | Premium UI (docking, layouts, themes, comparison, accessibility, input remapping) | ⬜ |
+| S5 | Universe exploration (Gaia stars, known exoplanets, galaxy layer, search) | 🟡 1.0.0: galaxy layer, Local Group, Orion Nebula, search |
+| S6 | Exotic objects (white dwarfs, neutron stars, black holes, lensing, stellar evolution) | ✅ 1.0.0 |
+| S7 | Premium UI (docking, layouts, themes, comparison, accessibility, input remapping) | 🟡 1.0.0: icon UI, tours, timeline, photo mode |
 | S8–S10 | Advanced planetary consequences · long-time physics · productization (signing, updates) | ⬜ |
 
 Notes on the requested direction for habitable worlds: a world is only labelled habitable from

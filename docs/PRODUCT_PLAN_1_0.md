@@ -83,3 +83,23 @@ the first minute, and (4) produce stories worth sharing.
 
 Sources: Universe Sandbox Steam roadmap discussion and user reviews (Steam, Metacritic,
 PC Gamer); SpaceEngine Steam reviews and press; Dwarf Fortress "Legends" (DF wiki).
+
+## Status at 1.0.0 (2026-10-04)
+Shipped:
+* A. Life and death of stars; compact objects with lensing, accretion disks and pulsar beams;
+  planetary nebulae and supernova remnants; **star formation** in nurseries (the real Orion Nebula);
+  galaxy layer (Milky Way, Local Group, deep field with quasars).
+* B. Catastrophic disruption with debris and molten remnants, Roche rings, impact flashes and shock
+  rings, comets with ion and dust tails; Throw / Grab tools with live trajectories.
+* C. Dyson swarms, terraforming, generation ships founding branch civilizations (contact by radio
+  already existed).
+* D. Redesigned interface (icons, tree, time bar, tool dock), four guided tours, timeline with
+  rewind, photo mode, synthesised sound.
+
+Not yet (candidates for 1.x):
+* GPU N-body for thousands of particles; galactic collisions; gravitational waves, kilonovae and
+  tidal disruption events; auroras; atmospheric entry fireballs.
+* Real nearby stars from Gaia and known exoplanets; dark clouds beyond Orion.
+* The Chronicle as an exportable book; Fermi-paradox galaxy map; challenges; observatory mode;
+  video capture and a cinematic camera.
+* Signed installers, update check, localisation, accessibility options, mod folder.

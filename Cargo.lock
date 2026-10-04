@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "cosmogon"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "bevy",
  "bevy_egui",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "cosmogon_cli"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cosmogon_sim",
  "serde_json",
@@ -2169,7 +2169,7 @@ dependencies = [
 
 [[package]]
 name = "cosmogon_core"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "bytemuck",
  "glam 0.29.3",
@@ -2181,7 +2181,7 @@ dependencies = [
 
 [[package]]
 name = "cosmogon_physics"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cosmogon_core",
  "rayon",
@@ -2189,7 +2189,7 @@ dependencies = [
 
 [[package]]
 name = "cosmogon_sim"
-version = "0.5.0"
+version = "1.0.0"
 dependencies = [
  "cosmogon_core",
  "cosmogon_physics",

@@ -1,14 +1,14 @@
-# Cosmogon 0.5.0 — "Worlds and civilizations you can see"
+# Cosmogon 1.0.0 — "The whole universe"
 
-A free, open-source simulator of a living universe: stars, planets, life and civilizations
-that discover technology through causes rather than timers.
+A free, open-source universe sandbox: throw planets and black holes, watch stars live and die,
+pull back from a city street to the cosmic web — and see what happens to the people.
 
 ## Downloads
 | Platform | File | Notes |
 |---|---|---|
-| macOS 11+ (Apple Silicon & Intel) | `Cosmogon-0.5.0-macOS.dmg` | Open, drag Cosmogon to Applications. |
-| Windows 10/11 (64-bit) | `Cosmogon-0.5.0-Windows-Setup.exe` | Installer with Start-menu shortcut. |
-| Windows 10/11 (64-bit) | `Cosmogon-0.5.0-Windows.exe` | Portable: just run it. |
+| macOS 11+ (Apple Silicon & Intel) | `Cosmogon-1.0.0-macOS.dmg` | Open, drag Cosmogon to Applications. |
+| Windows 10/11 (64-bit) | `Cosmogon-1.0.0-Windows-Setup.exe` | Installer with Start-menu shortcut. |
+| Windows 10/11 (64-bit) | `Cosmogon-1.0.0-Windows.exe` | Portable: just run it. |
 | Linux x86-64 | `Cosmogon-linux-x86_64.tar.gz` | Extract and run `cosmogon`. |
 
 Nothing else needs to be installed. A GPU with Metal, Vulkan or DirectX 12 is required.
@@ -23,26 +23,35 @@ warns the first time:
 
 ## What's new
 
-**Every world has its own face.** Io's volcanoes and red plume rings, Europa's cracked ice,
-Ganymede's grooves, Callisto's ancient craters, Enceladus's tiger stripes, Titan's orange haze,
-Venus's clouds, Jupiter's belts and Great Red Spot, Saturn's hexagon and measured rings,
-Neptune's dark storm. Exoplanets follow real temperature classes: cream, white, cloudless-blue,
-dark and glowing hot Jupiters, lava worlds, mini-Neptunes.
+**Start with the tour.** Four guided tours — from Earth to the cosmic web, a black hole passing
+through, the death of the Sun, Halley's Comet — show you around in a few minutes.
 
-**Light done properly.** Atmospheric scattering (blue skies, sunsets, Titan's haze), moon
-shadows and eclipses, ring shadows, living stellar surfaces, detail that keeps going as you zoom.
+**Throw anything.** Pick Throw, choose a planet, a comet, a star or a black hole from the shelf and
+drag to fling it, with the trajectory drawn live. Click without dragging for a circular orbit.
+Grab moves things. Collisions shatter worlds after real disruption scaling: debris, molten
+surfaces, boiling oceans, a flash and a shock ring racing over the ground. Moons that stray inside
+the Roche limit become rings.
 
-**Humanity in 2026.** The Solar System Lab starts with 8.23 billion people, real cities and
-countries, 11 000 satellites, the real exploration record and BepiColombo, Europa Clipper and
-JUICE in flight.
+**Stars live and die.** Red giants swell and swallow their inner planets; dying stars leave
+planetary nebulae and white dwarfs, or explode as supernovae and leave neutron stars and black
+holes — whose radiation crosses the galaxy at light speed. New stars are born in nurseries like the
+real Orion Nebula.
 
-**Civilizations you can watch.** Era, Kardashev rating and next breakthroughs at a glance;
-satellites, stations, spacecraft and colonies visible in space; cities and farmland on the
-ground. Civilizations explore their systems, land on other worlds, send colony ships and move
-away from fossil fuels on their own.
+**Black holes that bend light.** Ray-traced lensing, the photon ring and blazing accretion disks;
+pulsars sweep their beams.
 
-**Interfere — within limits.** Inspire, send a signal, share knowledge, teach a technology they
-are ready for, or test them with hardship; once every 25 years, never skipping their own history.
+**The whole universe.** Pull back from the Sun and the camera swings to the Galactic Centre: the
+Milky Way's bar and arms, the Magellanic Clouds, Andromeda, and beyond them thousands of galaxies and
+quasars along the cosmic web.
 
-Also: procedural systems no longer guarantee an Earth-like planet; hot Jupiters can form.
-Full details: `docs/MILESTONE_G1_C1.md` and `CHANGELOG.md`.
+**Civilizations beyond their world.** Dyson swarms that harvest a star, terraformed planets,
+generation ships that found new branches of a civilization around other stars.
+
+**Comets.** Halley's Comet on its real orbit; every comet grows a blue ion tail pointing away from
+the Sun and a curved dust tail.
+
+**A new interface.** Icons, a cleaner universe tree, a timeline you can rewind (click a snapshot),
+photo mode (P) for clean screenshots, and a synthesised soundtrack with impact rumbles and supernova
+roars.
+
+Full details: `CHANGELOG.md` and `docs/PRODUCT_PLAN_1_0.md`.

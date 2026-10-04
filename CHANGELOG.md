@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.0 — The whole universe (2026-10-04)
+Plan and rationale: docs/PRODUCT_PLAN_1_0.md.
+### Added
+* **Life and death of stars**: main sequence → red giant (swelling, brightening, swallowing inner
+  planets, shedding mass so surviving orbits widen) → planetary nebula and white dwarf, or supernova
+  and neutron star / black hole by initial mass; supernova radiation fronts cross interstellar space
+  at light speed and sterilise worlds in their path.
+* **Compact objects you can create and throw**: black holes with ray-traced gravitational lensing,
+  photon ring and Doppler-beamed accretion disks; neutron stars with pulsar beams; white dwarfs;
+  extra stars.
+* **Star formation**: stellar nurseries turn gas into new star systems until the cloud is spent; the
+  real **Orion Nebula** with the Trapezium stars at 1,344 ly; ray-marched emission nebulae.
+* **Galaxy scale**: the Milky Way seen from outside at its real orientation (bar, arms, dust, star-
+  forming knots), the Local Group (Andromeda, Triangulum, Magellanic Clouds) at catalogued positions,
+  and a deep field of galaxies and quasars along a cosmic web; the camera pivots to the Galactic Centre
+  as you pull back.
+* **Spectacle physics**: catastrophic disruption after Leinhardt & Stewart (2012) with debris, molten
+  remnants and boiling oceans; moons inside the Roche limit become rings; impact flashes and shock
+  rings; comets with sublimation-driven comae, ion tails and curved dust tails.
+* **Throwing, Universe Sandbox style**: Throw (drag to fling, click for a circular orbit, live
+  trajectory) and Grab tools, an object shelf, Aim and Create in a tool dock.
+* **Civilizations across the stars**: Dyson swarms (Kardashev II), terraforming of colony worlds,
+  generation ships that found new branch civilizations at stars scouted by probes.
+* **Interface**: Inter + Phosphor icons, icon top bar with search, redesigned universe tree, time bar
+  with speed slider, **guided tours** (four), **timeline with rewind**, **photo mode** (P),
+  synthesised **sound**, decluttered labels.
+* **Experiments**: Halley's Comet, Theia, a second sun, a feeding black hole, the Sun as a red giant
+  or a dying supergiant, a Kardashev II humanity, and more.
+### Changed
+* Golden fingerprint re-pinned (new civilization fields and technologies); old saves load.
+* Technologies that build on not-yet-invented ones can no longer leak into present-day Earth.
+### Fixed
+* Far-distance f32 overflow in direction normalisation (camera and galaxy shader).
+* Inter's private-use glyphs shadowing Phosphor icons.
+
 ## 0.5.0 — Worlds and civilizations you can see (2026-10-04)
 Details: docs/MILESTONE_G1_C1.md.
 ### Added
