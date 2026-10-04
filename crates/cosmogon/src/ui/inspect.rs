@@ -62,7 +62,7 @@ pub fn left_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut
                         .show(ui, |ui| {
                             let star_sel = sim.selected == Some(Target::Star(sid));
                             let (sr, sg, sb) = cosmogon_sim::kelvin_to_rgb(sys.star.temperature_at(u.time).clamp(1000.0, 40_000.0));
-                            let scol = body_color([sr as f32, sg as f32, sb as f32]);
+                            let scol = body_color([sr, sg, sb]);
                             let disc = move |p: &egui::Painter, c: egui::Pos2| {
                                 p.circle_filled(c, 9.0, scol.gamma_multiply(0.2));
                                 p.circle_filled(c, 6.0, scol);
