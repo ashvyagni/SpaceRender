@@ -432,7 +432,7 @@ pub fn main_menu(
             ui.colored_label(DANGER, m);
         }
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            ui.label(egui::RichText::new(format!("v{} · sandbox foundation", env!("CARGO_PKG_VERSION"))).size(11.0).color(MUTED));
+            ui.label(egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).size(11.0).color(MUTED));
             if let Some(l) = &latest {
                 ui.label(egui::RichText::new(format!("Last: {} — {}", l.manifest.name, ago(l.manifest.modified_unix))).size(11.0).color(MUTED));
             }
@@ -440,6 +440,22 @@ pub fn main_menu(
     });
 
     if s.menu == MenuScreen::Home {
+        // First stop for newcomers: the guided tour.
+        egui::Area::new(egui::Id::new("tour_invite")).anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-40.0, -40.0)).show(ctx, |ui| {
+            let r = card(ui, false, |ui| {
+                ui.set_width(340.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(super::icon::COMPASS).size(22.0).color(ACCENT));
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("New here? Take the guided tour").size(15.0).strong().color(TEXT));
+                        ui.label(egui::RichText::new(super::tour::TOURS[0].blurb).size(11.5).color(MUTED));
+                    });
+                });
+            });
+            if r.on_hover_text("Start the tour").clicked() {
+                start_tour(&mut commands, &mut next, 0);
+            }
+        });
         return Ok(());
     }
 
@@ -687,8 +703,35 @@ fn load_screen(ui: &mut egui::Ui, s: &mut UiState, thumbs: &Thumbs, commands: &m
     }
 }
 
+/// Open a tour's sandbox (not saved to the library) and start narrating.
+pub fn start_tour(commands: &mut Commands, next: &mut NextState<AppState>, index: usize) {
+    let t = &super::tour::TOURS[index];
+    let settings = UniverseSettings { seed: 1, scenario: Scenario::SolarSystemLab, physics: Some(PhysicsPreset::Balanced.settings()), ..Default::default() };
+    begin_new(commands, next, NewSandbox { settings, advance_years: 0.0, name: t.title.into(), description: t.blurb.into(), template: "solar_system_lab".into(), what_if: t.what_if.map(Into::into), persist: false });
+    commands.insert_resource(super::tour::ActiveTour { tour: index, step: 0, applied: None });
+}
+
 fn scenarios(ui: &mut egui::Ui, s: &mut UiState, commands: &mut Commands, next: &mut NextState<AppState>) {
-    heading(ui, "Scenarios", "Curated experiments. Each is an ordinary sandbox set up with the same tools you have — nothing is scripted.");
+    heading(ui, "Scenarios", "Guided tours for a first look, and curated experiments — ordinary sandboxes set up with the same tools you have. Nothing is scripted.");
+    ui.label(egui::RichText::new("GUIDED TOURS").size(11.0).color(ACCENT).strong());
+    for (i, t) in super::tour::TOURS.iter().enumerate() {
+        let r = card(ui, false, |ui| {
+            ui.set_width(610.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(super::icon::COMPASS).size(18.0).color(ACCENT));
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(t.title).size(15.0).strong().color(TEXT));
+                    ui.label(egui::RichText::new(format!("{} · {} steps", t.blurb, t.steps.len())).size(11.5).color(MUTED));
+                });
+            });
+        });
+        if r.on_hover_text("Start this tour").clicked() {
+            start_tour(commands, next, i);
+        }
+        ui.add_space(6.0);
+    }
+    ui.add_space(10.0);
+    ui.label(egui::RichText::new("EXPERIMENTS").size(11.0).color(ACCENT).strong());
     for w in WHAT_IFS {
         let r = card(ui, false, |ui| {
             ui.set_width(610.0);

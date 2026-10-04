@@ -471,6 +471,9 @@ fn poll_pending(mut commands: Commands, pending: Option<ResMut<PendingUniverse>>
                 if let Some(s) = args.speed {
                     sim.speed = s.min(SPEEDS.len() - 1);
                 }
+                if let Some(i) = args.tour.as_deref().and_then(crate::ui::tour::tour_by_id) {
+                    commands.insert_resource(crate::ui::tour::ActiveTour { tour: i, step: 0, applied: None });
+                }
                 if args.panel.as_deref() == Some("launch") {
                     sim.tool = Tool::Launch(LaunchSpec::default());
                 }

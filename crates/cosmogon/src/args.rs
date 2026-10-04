@@ -32,6 +32,8 @@ pub struct Args {
     pub latlon: Option<(f64, f64)>,
     /// Apply a curated experiment (`--what-if chicxulub_today`) to a new Solar System Lab.
     pub what_if: Option<String>,
+    /// Start this guided tour (developer: combine with --what-if for tours that need one).
+    pub tour: Option<String>,
     /// Physics preset to start the home system with dynamic gravity (fast|balanced|accurate|research).
     pub nbody: Option<String>,
     /// Open a tool window at start (create | launch | physics | palette) — for captures.
@@ -77,6 +79,7 @@ impl Args {
                 "--select-civ" => a.select_civ = true,
                 "--debug" => a.debug = true,
                 "--what-if" => a.what_if = Some(val()),
+                "--tour" => a.tour = Some(val()),
                 "--nbody" => a.nbody = Some(val()),
                 "--panel" => a.panel = Some(val()),
                 "--menu" => a.menu = Some(val()),
