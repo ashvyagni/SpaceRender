@@ -83,6 +83,10 @@ pub struct UiState {
     pub save_as_dialog: Option<String>,
     pub checkpoint_label: String,
     pub impulse: [f64; 3],
+    /// Set by the photo button / P; forwarded to `capture::Photo`.
+    pub photo_requested: bool,
+    /// A photo is being taken: draw nothing but the universe.
+    pub photo_mode: bool,
 }
 
 impl Default for UiState {
@@ -119,6 +123,8 @@ impl Default for UiState {
             save_as_dialog: None,
             checkpoint_label: String::new(),
             impulse: [0.0; 3],
+            photo_requested: false,
+            photo_mode: false,
         }
     }
 }

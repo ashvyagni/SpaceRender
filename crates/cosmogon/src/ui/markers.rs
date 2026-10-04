@@ -39,6 +39,9 @@ pub fn draw_markers(
     args: Res<crate::args::Args>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
+    if ui_state.photo_mode {
+        return Ok(());
+    }
     let Ok((camera, cam_tf)) = cam.single() else { return Ok(()) };
     let project = |p: DVec3| -> Option<egui::Pos2> {
         let rel = (p - view.origin).as_vec3();

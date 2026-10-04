@@ -50,6 +50,9 @@ pub fn keyboard(mut contexts: EguiContexts, keys: Res<ButtonInput<KeyCode>>, mut
     if keys.just_pressed(KeyCode::Tab) {
         ui.hidden = !ui.hidden;
     }
+    if keys.just_pressed(KeyCode::KeyP) {
+        ui.photo_requested = true;
+    }
     if keys.just_pressed(KeyCode::F3) {
         ui.debug = !ui.debug;
     }
@@ -135,6 +138,9 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
                 }
                 if icon_button(ui, icon::QUESTION, "Controls (F1)", ui_state.help, true).clicked() {
                     ui_state.help = !ui_state.help;
+                }
+                if icon_button(ui, icon::CAMERA, "Photo (P): save a clean screenshot to Pictures/Cosmogon", false, true).clicked() {
+                    ui_state.photo_requested = true;
                 }
                 ui.menu_button(egui::RichText::new(icon::EYE).size(17.0), |ui| {
                     ui.label(egui::RichText::new("SHOW").size(10.0).color(ACCENT));
