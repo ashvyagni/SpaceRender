@@ -779,6 +779,9 @@ pub fn settings_ui(ui: &mut egui::Ui, settings: &mut UserSettings) {
     ui.label(egui::RichText::new("Settings").size(22.0).strong());
     ui.add_space(8.0);
     egui::Grid::new("settings").num_columns(2).spacing([14.0, 9.0]).show(ui, |ui| {
+        ui.label("Sound");
+        ui.add(egui::Slider::new(&mut settings.sound_volume, 0.0..=1.0).show_value(false).text("volume"));
+        ui.end_row();
         ui.label("Graphics");
         ui.horizontal(|ui| {
             for g in GraphicsPreset::ALL {

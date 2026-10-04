@@ -95,6 +95,7 @@ pub fn update_impact_flashes(
     mut seen: ResMut<SeenImpacts>,
     mut flashes: Query<(Entity, &mut ImpactFlash, &mut Transform, &MeshMaterial3d<FlashMaterial>)>,
     mut mats: ResMut<Assets<FlashMaterial>>,
+    mut sounds: MessageWriter<crate::audio::SoundCue>,
 ) {
     let u = &sim.universe;
     let now = time.elapsed_secs();
@@ -113,6 +114,7 @@ pub fn update_impact_flashes(
                 let outer = flash_extent(rec.blast_radius_m, rec.impactor_radius, b.radius);
                 // Brightness grows slowly with energy: a 1 Mt airburst is a spark, Chicxulub a sun.
                 let brightness = (rec.energy_j.max(1.0).log10() as f32 - 14.0).clamp(0.5, 12.0);
+                sounds.write(crate::audio::SoundCue { kind: crate::audio::SynthKind::Rumble, intensity: brightness / 12.0 });
                 let m = mats.add(FlashMaterial { u: FlashUniform::default() });
                 commands.spawn((
                     Mesh3d(shared.sphere.clone()),

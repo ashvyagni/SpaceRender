@@ -74,6 +74,8 @@ pub struct UserSettings {
     pub show_velocity: bool,
     /// Intro animation on start.
     pub intro: bool,
+    /// Master volume for the soundtrack and effects (0 = silent).
+    pub sound_volume: f32,
 }
 
 impl Default for UserSettings {
@@ -94,6 +96,7 @@ impl Default for UserSettings {
             show_predictions: true,
             show_velocity: false,
             intro: true,
+            sound_volume: 0.6,
         }
     }
 }

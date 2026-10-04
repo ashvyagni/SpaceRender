@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod audio;
 mod camera;
 mod capture;
 mod interact;
@@ -53,6 +54,7 @@ fn main() {
             ui::UiPlugin,
             capture::CapturePlugin,
             timeline::TimelinePlugin,
+            audio::SoundPlugin,
             interact::InteractPlugin,
         ))
         .run();
