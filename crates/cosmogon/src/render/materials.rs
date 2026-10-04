@@ -29,6 +29,8 @@ pub struct PlanetUniform {
     pub ring_normal: Vec4,
     /// World → body-frame rotation (quaternion xyzw).
     pub orient: Vec4,
+    /// x: molten-surface glow 0..1, y: melt temperature (K) — after violent impacts.
+    pub heat: Vec4,
     /// Shadow-casting moons: xyz offset / R, w: radius / R (0 = unused).
     pub occluders: [Vec4; 4],
 }

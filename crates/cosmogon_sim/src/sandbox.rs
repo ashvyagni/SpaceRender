@@ -765,6 +765,10 @@ impl Universe {
                 let i = i as usize;
                 let record = self.impact_record(s, i, j, &c);
                 self.apply_impact(s, i, record);
+                let now = self.systems[s].dynamics.as_ref().map(|d| d.time()).unwrap_or(t);
+                if self.systems[s].bodies[j].kind.has_surface() {
+                    self.maybe_fragment(s, i, c.gm_a / G, c.gm_b / G, &c, now);
+                }
                 self.on_body_destroyed(s, j, t, &format!("collided with {}", self.systems[s].bodies[i].name));
             }
         }
@@ -963,6 +967,7 @@ impl Universe {
             if !self.systems[s].is_dynamic() {
                 continue;
             }
+            self.roche_disruptions(s, t);
             let n = self.systems[s].bodies.len();
             {
                 let d = self.systems[s].dynamics.as_mut().unwrap();
@@ -1114,6 +1119,7 @@ pub const WHAT_IFS: &[WhatIf] = &[
     WhatIf { id: "sun_red_giant", title: "What if it were 7.6 billion years from now?", description: "The Sun near the tip of its red-giant phase, swelling towards 1 AU. Mercury and Venus are next." },
     WhatIf { id: "sun_supernova", title: "What if the Sun were a dying supergiant?", description: "A 25 M☉ star at the very end of its life takes the Sun's place. Its gravity is 25× stronger, so the planets plunge inwards; within decades it explodes and leaves a black hole." },
     WhatIf { id: "feeding_black_hole", title: "What if a black hole orbited the Sun?", description: "A 10 M☉ black hole feeding on gas circles at 30 AU, its disk blazing — and Neptune's orbit is in its way." },
+    WhatIf { id: "theia", title: "What if Theia struck Earth again?", description: "A Mars-sized world grazes Earth at 10 km/s — the giant impact thought to have made the Moon. Earth melts; debris fills the sky." },
     WhatIf { id: "second_sun", title: "What if a second sun arrived?", description: "A Sun-like star approaches from 300 AU. Will the planets stay with their star — or follow the newcomer?" },
 ];
 
@@ -1206,6 +1212,15 @@ pub fn apply_what_if(u: &mut Universe, id: &str) -> Result<(), String> {
         "feeding_black_hole" => {
             let body = body_from_preset(preset("black_hole_10").unwrap(), "Charon's Gate", 0xFEED);
             let state = circular_state(u.system(0), None, body.mass, 30.0 * AU, 1.2, 0.05, t);
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "theia" => {
+            let e = find(u, "Earth")?;
+            let mut body = body_from_preset(preset("mars_like").unwrap(), "Theia", 0x7E1A);
+            body.mass = 0.11 * EARTH_MASS;
+            body.radius = 3.39e6;
+            // Graze: miss distance ~70% of the combined radii.
+            let state = aimed_state(u.system(0), e.body as usize, 6.0e7, Vec3d::new(0.3, 1.0, 0.1), 10_000.0, 0.7 * (6.371e6 + 3.39e6), t);
             u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
         }
         "sun_red_giant" => {
@@ -1430,6 +1445,22 @@ mod tests {
             !el.is_bound() || (el.semi_major_axis / earth_a0 - 1.0).abs() > 0.05
         };
         assert!(changed, "a 10 M☉ black hole passing at 2.5 AU must disturb Earth");
+    }
+
+    #[test]
+    fn theia_shatters_and_melts_earth() {
+        let mut u = lab();
+        let n0 = u.system(0).bodies.len();
+        apply_what_if(&mut u, "theia").unwrap();
+        u.advance_by(3.0 * SECONDS_PER_DAY);
+        let sys = u.system(0);
+        let debris = sys.bodies.iter().filter(|b| b.class == Some(ObjectClass::DebrisField)).count();
+        assert!(debris >= 3, "debris {debris} (bodies {} → {})", n0, sys.bodies.len());
+        let e = u.body(earth(&u));
+        assert!(e.exists());
+        assert!(e.melt.is_some_and(|m| m.glow(u.time) > 0.3), "{:?}", e.melt);
+        // All life is gone.
+        assert!(u.biosphere(earth(&u)).is_none_or(|b| b.stage == Stage::Sterile));
     }
 
     #[test]

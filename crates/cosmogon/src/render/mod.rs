@@ -755,6 +755,10 @@ fn update_planet_materials(
             m.u.ring_normal = ring_normal;
             m.u.orient = Vec4::new(q.x, q.y, q.z, q.w);
             m.u.occluders = occ;
+            m.u.heat = match body.melt {
+                Some(melt) => Vec4::new(melt.glow(t) as f32, melt.temperature(t) as f32, 0.0, 0.0),
+                None => Vec4::ZERO,
+            };
         }
         for child in children.into_iter().flat_map(|c| c.iter()) {
             if let Ok(shell) = shells.get(child) {

@@ -295,6 +295,9 @@ pub struct Body {
     /// visual: a glowing accretion disk).
     #[serde(default)]
     pub accretion: f64,
+    /// Molten surface after a violent impact.
+    #[serde(default)]
+    pub melt: Option<crate::collision::Melt>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

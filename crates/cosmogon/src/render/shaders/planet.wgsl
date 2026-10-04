@@ -31,6 +31,8 @@ struct PlanetUniform {
     ring_normal: vec4<f32>,
     // Quaternion rotating world-frame offsets into the body's own (spinning) frame
     orient: vec4<f32>,
+    // x: molten glow 0..1, y: melt temperature (K)
+    heat: vec4<f32>,
     // Shadow-casting moons: xyz offset / R, w: radius / R (0 = unused)
     occluders: array<vec4<f32>, 4>,
 };
@@ -99,7 +101,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surf = textureSample(albedo_tex, albedo_samp, uv);
     var base = surf.rgb;
     let cloud_uv = vec2<f32>(fract(uv.x + planet.params.x), uv.y);
-    var cloud = textureSample(cloud_tex, cloud_samp, cloud_uv).r * planet.params.y;
+    // Clouds burn off over a molten surface.
+    var cloud = textureSample(cloud_tex, cloud_samp, cloud_uv).r * planet.params.y * (1.0 - clamp(planet.heat.x * 3.0, 0.0, 1.0));
 
     // Procedural detail beyond the texture: albedo variation, and bump-mapped relief on
     // solid worlds so craters and ridges keep catching the light up close.
@@ -141,6 +144,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let night = 1.0 - smoothstep(-0.18, 0.05, dot(normalize(in.world_normal), l));
     let emit = textureSample(emission_tex, emission_samp, uv).r;
     color += planet.emission.rgb * planet.emission.w * emit * mix(0.25, 1.0, night) * (1.0 + 0.3 * zoom * fine);
+
+    // A molten surface after a giant impact: incandescent cracks on a darkening crust.
+    if (planet.heat.x > 0.001) {
+        let crack = 1.0 - abs(fbm4(d * 18.0 + seed * 3.1));
+        let veins = pow(clamp(crack, 0.0, 1.0), 6.0);
+        let tk = planet.heat.y / 1000.0;
+        let glow_col = vec3<f32>(1.0, clamp(0.12 * tk * tk, 0.08, 0.55), clamp(0.012 * tk * tk * tk, 0.0, 0.18));
+        let g = planet.heat.x;
+        color = color * (1.0 - 0.92 * g) + glow_col * g * (0.45 + 3.0 * veins) * 1.8;
+    }
 
     // Artificial lights on the night side — the signature of an industrial civilization.
     let lights = textureSample(lights_tex, lights_samp, in.uv).r;

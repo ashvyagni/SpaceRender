@@ -447,6 +447,7 @@ fn make_body(
         impact_winter: None,
         elevation_data: None,
         accretion: 0.0,
+        melt: None,
     };
     update_climate(&mut body, star, 0.0, stellar_a_au * AU);
     if garden {

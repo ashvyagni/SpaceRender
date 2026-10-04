@@ -19,6 +19,8 @@ struct PlanetUniform {
     ring: vec4<f32>,
     ring_normal: vec4<f32>,
     orient: vec4<f32>,
+    // x: molten glow 0..1, y: melt temperature (K)
+    heat: vec4<f32>,
     occluders: array<vec4<f32>, 4>,
 };
 
@@ -118,6 +120,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let emit = textureSample(emission_tex, emission_samp, uv).r;
     color += planet.emission.rgb * planet.emission.w * emit * mix(0.25, 1.0, night) * (1.0 + 2.0 * albedo_k);
 
+    if (planet.heat.x > 0.001) {
+        let crack = 1.0 - abs(fbm4(local / 40000.0 + vec3<f32>(seed)));
+        let veins = pow(clamp(crack, 0.0, 1.0), 6.0);
+        let tk = planet.heat.y / 1000.0;
+        let glow_col = vec3<f32>(1.0, clamp(0.12 * tk * tk, 0.08, 0.55), clamp(0.012 * tk * tk * tk, 0.0, 0.18));
+        color = color * (1.0 - 0.92 * planet.heat.x) + glow_col * planet.heat.x * (0.45 + 3.0 * veins) * 1.8;
+    }
     let lights = textureSample(lights_tex, lights_samp, uv).r;
     color += vec3<f32>(1.0, 0.68, 0.32) * lights * night * planet.params.z;
     return vec4<f32>(color, 1.0);
