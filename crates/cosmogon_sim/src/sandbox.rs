@@ -1120,6 +1120,7 @@ pub const WHAT_IFS: &[WhatIf] = &[
     WhatIf { id: "sun_supernova", title: "What if the Sun were a dying supergiant?", description: "A 25 M☉ star at the very end of its life takes the Sun's place. Its gravity is 25× stronger, so the planets plunge inwards; within decades it explodes and leaves a black hole." },
     WhatIf { id: "feeding_black_hole", title: "What if a black hole orbited the Sun?", description: "A 10 M☉ black hole feeding on gas circles at 30 AU, its disk blazing — and Neptune's orbit is in its way." },
     WhatIf { id: "theia", title: "What if Theia struck Earth again?", description: "A Mars-sized world grazes Earth at 10 km/s — the giant impact thought to have made the Moon. Earth melts; debris fills the sky." },
+    WhatIf { id: "halley", title: "What if Halley's Comet came back now?", description: "Comet 1P/Halley, a month before perihelion on its real retrograde orbit: watch its ion and dust tails grow as it swings past the Sun." },
     WhatIf { id: "second_sun", title: "What if a second sun arrived?", description: "A Sun-like star approaches from 300 AU. Will the planets stay with their star — or follow the newcomer?" },
 ];
 
@@ -1221,6 +1222,23 @@ pub fn apply_what_if(u: &mut Universe, id: &str) -> Result<(), String> {
             body.radius = 3.39e6;
             // Graze: miss distance ~70% of the combined radii.
             let state = aimed_state(u.system(0), e.body as usize, 6.0e7, Vec3d::new(0.3, 1.0, 0.1), 10_000.0, 0.7 * (6.371e6 + 3.39e6), t);
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "halley" => {
+            // 1P/Halley (JPL SBDB): q = 0.586 AU, e = 0.967, i = 162.2°, Ω = 59.4°, ω = 112.0°;
+            // nucleus 15 × 8 × 8 km (mean radius ≈ 5.5 km), density ≈ 600 kg/m³.
+            let mut body = body_from_preset(preset("comet_5km").unwrap(), "Halley", 0x1986);
+            body.radius = 5_500.0;
+            body.mass = 4.0 / 3.0 * std::f64::consts::PI * body.radius.powi(3) * 600.0;
+            let sys = u.system(0);
+            let mu = sys.star.mu();
+            let (q, e) = (0.586 * AU, 0.967);
+            let a = q / (1.0 - e);
+            let n = (mu / (a * a * a)).sqrt();
+            let m_now = -n * 30.0 * 86_400.0;
+            let orbit = Orbit { a, e, i: 162.2f64.to_radians(), node: 59.4f64.to_radians(), peri: 112.0f64.to_radians(), m0: m_now - n * t };
+            let (pos, vel) = orbit.state(mu, mu + G * body.mass, t);
+            let state = State { pos: sys.star_local_position(t) + pos, vel };
             u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
         }
         "sun_red_giant" => {
@@ -1445,6 +1463,22 @@ mod tests {
             !el.is_bound() || (el.semi_major_axis / earth_a0 - 1.0).abs() > 0.05
         };
         assert!(changed, "a 10 M☉ black hole passing at 2.5 AU must disturb Earth");
+    }
+
+    #[test]
+    fn halley_reaches_perihelion_on_time() {
+        let mut u = lab();
+        apply_what_if(&mut u, "halley").unwrap();
+        let h = find(&u, "Halley").unwrap().body as usize;
+        let dist = |u: &Universe| (u.system(0).body_local_position(h, u.time) - u.system(0).star_local_position(u.time)).length() / AU;
+        let d0 = dist(&u);
+        assert!(d0 > 0.7 && d0 < 1.1, "a month out: {d0} AU");
+        let mut closest = d0;
+        for _ in 0..60 {
+            u.advance_by(SECONDS_PER_DAY);
+            closest = closest.min(dist(&u));
+        }
+        assert!((closest - 0.586).abs() < 0.02, "perihelion {closest} AU");
     }
 
     #[test]

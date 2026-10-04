@@ -10,6 +10,7 @@
 //! (Bevy): +Y up. Mapping: render = (x, z, -y).
 
 pub mod bake;
+pub mod comets;
 pub mod galaxy;
 pub mod look;
 pub mod materials;
@@ -155,11 +156,12 @@ impl Plugin for RenderPlugin {
             .add_plugins(overlays::OverlayPlugin)
             .add_plugins(stellar::StellarPlugin)
             .add_plugins(galaxy::GalaxyPlugin)
+            .add_plugins(comets::CometPlugin)
             .add_systems(
                 Update,
                 (
                     (stellar::sync_primaries, stellar::update_star_sizes).chain().in_set(Frame::Positions),
-                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae, galaxy::update_galaxies).chain().in_set(Frame::Apply).after(apply_origin),
+                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae, galaxy::update_galaxies, comets::sync_comets).chain().in_set(Frame::Apply).after(apply_origin),
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             );
