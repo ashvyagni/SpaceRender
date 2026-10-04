@@ -19,18 +19,6 @@ use super::units::{self, Quantity};
 use cosmogon_sim::astro::{Quality, RemovalCause, SOLAR_MASS};
 use cosmogon_sim::sandbox::{hill_radius, roche_limit, warnings, BodyProperty, Edit, StarProperty};
 
-fn life_glyph(u: &Universe, r: BodyRef) -> Option<(&'static str, egui::Color32)> {
-    if u.civ_on(r).is_some() {
-        return Some(("●", CIV));
-    }
-    let b = u.biosphere(r)?;
-    match b.stage {
-        Stage::Sterile | Stage::Prebiotic => None,
-        Stage::Microbial | Stage::ComplexCells => Some(("•", LIFE)),
-        _ => Some(("●", LIFE)),
-    }
-}
-
 enum Action {
     Focus(Target),
 }
@@ -43,9 +31,16 @@ pub fn left_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut
     let mut action = None;
     egui::SidePanel::left("universe").default_width(290.0).frame(egui::Frame::new().fill(super::PANEL).inner_margin(10)).show(ctx, |ui| {
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut ui_state.left_tab, LeftTab::Systems, "Systems");
-            ui.selectable_value(&mut ui_state.left_tab, LeftTab::Chronicle, "Chronicle");
-            ui.selectable_value(&mut ui_state.left_tab, LeftTab::Civilizations, "Civilizations");
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (tab, glyph, name) in [(LeftTab::Systems, super::icon::PLANET, "Systems"), (LeftTab::Chronicle, super::icon::BOOK_OPEN, "Chronicle"), (LeftTab::Civilizations, super::icon::USERS_THREE, "Civilizations")] {
+                let on = ui_state.left_tab == tab;
+                let text = egui::RichText::new(format!("{glyph} {name}")).size(13.0).color(if on { ACCENT } else { MUTED });
+                let mut btn = egui::Button::new(text).corner_radius(7).min_size(egui::vec2(0.0, 28.0));
+                btn = if on { btn.fill(egui::Color32::from_rgb(58, 45, 22)).stroke(egui::Stroke::new(1.0_f32, super::ACCENT_DIM)) } else { btn.fill(egui::Color32::TRANSPARENT) };
+                if ui.add(btn).clicked() {
+                    ui_state.left_tab = tab;
+                }
+            }
         });
         ui.separator();
         let u = &sim.universe;
@@ -66,7 +61,13 @@ pub fn left_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut
                         .open(if open_default { Some(true) } else { None })
                         .show(ui, |ui| {
                             let star_sel = sim.selected == Some(Target::Star(sid));
-                            let r = ui.selectable_label(star_sel, format!("☀ {}", sys.star.name));
+                            let (sr, sg, sb) = cosmogon_sim::kelvin_to_rgb(sys.star.temperature_at(u.time).clamp(1000.0, 40_000.0));
+                            let scol = body_color([sr as f32, sg as f32, sb as f32]);
+                            let disc = move |p: &egui::Painter, c: egui::Pos2| {
+                                p.circle_filled(c, 9.0, scol.gamma_multiply(0.2));
+                                p.circle_filled(c, 6.0, scol);
+                            };
+                            let r = tree_row(ui, 0, star_sel, disc, &sys.star.name, TEXT, &[(super::icon::SUN, MUTED, sys.star.spectral_type(u.time))]);
                             if r.clicked() {
                                 action = Some(Action::Focus(Target::Star(sid)));
                             }
@@ -77,7 +78,11 @@ pub fn left_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut
                                 }
                             }
                             for belt in &sys.belts {
-                                ui.label(egui::RichText::new(format!("   ⋯ {} ({:.1}–{:.1} AU)", belt.name, belt.inner / AU, belt.outer / AU)).size(11.5).color(MUTED));
+                                ui.horizontal(|ui| {
+                                    ui.add_space(12.0);
+                                    ui.label(egui::RichText::new(super::icon::DOTS_THREE_OUTLINE).color(MUTED));
+                                    ui.label(egui::RichText::new(format!("{}  {:.1}–{:.1} AU", belt.name, belt.inner / AU, belt.outer / AU)).size(12.0).color(MUTED));
+                                });
                             }
                         });
                 }
@@ -138,21 +143,92 @@ pub fn left_panel(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut
     Ok(())
 }
 
+/// Display colour of a body's albedo (normalised so dark worlds still read).
+fn body_color(c: [f32; 3]) -> egui::Color32 {
+    let m = c[0].max(c[1]).max(c[2]).max(1e-3);
+    let k = (0.55 + 0.45 * m).min(1.0) / m;
+    egui::Color32::from_rgb((c[0] * k * 235.0) as u8, (c[1] * k * 235.0) as u8, (c[2] * k * 235.0) as u8)
+}
+
+/// One row of the universe tree: a small disc in the body's colour (sized by type), its
+/// name, and badges for life and civilizations.
+fn tree_row(ui: &mut egui::Ui, indent: usize, selected: bool, disc: impl FnOnce(&egui::Painter, egui::Pos2), name: &str, name_color: egui::Color32, badges: &[(&str, egui::Color32, String)]) -> egui::Response {
+    let h = 26.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
+    let painter = ui.painter_at(rect);
+    if selected {
+        painter.rect_filled(rect, 6.0, egui::Color32::from_rgb(58, 45, 22));
+        painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, super::ACCENT_DIM), egui::StrokeKind::Inside);
+    } else if resp.hovered() {
+        painter.rect_filled(rect, 6.0, egui::Color32::from_rgb(22, 28, 42));
+    }
+    let x0 = rect.left() + 10.0 + indent as f32 * 16.0;
+    if indent > 0 {
+        // Tree guide for moons.
+        let gx = x0 - 9.0;
+        painter.line_segment([egui::pos2(gx, rect.top()), egui::pos2(gx, rect.center().y)], egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(40, 48, 66)));
+        painter.line_segment([egui::pos2(gx, rect.center().y), egui::pos2(gx + 5.0, rect.center().y)], egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(40, 48, 66)));
+    }
+    disc(&painter, egui::pos2(x0 + 7.0, rect.center().y));
+    let text_col = if selected { super::ACCENT } else { name_color };
+    painter.text(egui::pos2(x0 + 20.0, rect.center().y), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(13.5), text_col);
+    // Badges, right-aligned.
+    let mut x = rect.right() - 8.0;
+    for (glyph, col, tip) in badges.iter().rev() {
+        let r = painter.text(egui::pos2(x, rect.center().y), egui::Align2::RIGHT_CENTER, *glyph, egui::FontId::proportional(13.0), *col);
+        x = r.left() - 6.0;
+        let _ = tip;
+    }
+    let tips: Vec<&str> = badges.iter().map(|b| b.2.as_str()).collect();
+    if tips.is_empty() { resp } else { resp.on_hover_text(tips.join("\n")) }
+}
+
 fn body_row(ui: &mut egui::Ui, u: &Universe, sim: &Sim, r: BodyRef, indent: usize, action: &mut Option<Action>) {
     let b = u.body(r);
-    let glyph = match b.kind {
-        BodyKind::GasGiant | BodyKind::IceGiant => "○",
-        _ => "○",
+    let col = body_color(b.color);
+    let kind = b.kind;
+    let ringed = b.rings.is_some();
+    let size = match kind {
+        BodyKind::GasGiant => 6.5,
+        BodyKind::IceGiant => 5.5,
+        BodyKind::Star => 6.5,
+        BodyKind::BlackHole | BodyKind::NeutronStar | BodyKind::WhiteDwarf => 4.5,
+        _ if b.radius > 2.0e6 => 4.5,
+        _ if b.radius > 4.0e5 => 3.5,
+        _ => 2.5,
     };
-    let mut text = format!("{}{} {}", "    ".repeat(indent + 1), glyph, b.name);
+    let disc = move |p: &egui::Painter, c: egui::Pos2| match kind {
+        BodyKind::BlackHole => {
+            p.circle_filled(c, size, egui::Color32::BLACK);
+            p.circle_stroke(c, size + 1.0, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 160, 70)));
+        }
+        BodyKind::Star | BodyKind::WhiteDwarf | BodyKind::NeutronStar => {
+            p.circle_filled(c, size + 2.5, col.gamma_multiply(0.25));
+            p.circle_filled(c, size, col);
+        }
+        _ => {
+            p.circle_filled(c, size, col);
+            // Terminator shading so discs read as globes.
+            p.circle_filled(c + egui::vec2(size * 0.35, size * 0.25), size * 0.75, egui::Color32::from_black_alpha(60));
+            if ringed {
+                p.line_segment([c + egui::vec2(-size - 3.0, 1.5), c + egui::vec2(size + 3.0, -1.5)], egui::Stroke::new(1.2_f32, col.gamma_multiply(0.8)));
+            }
+        }
+    };
+    let mut badges: Vec<(&str, egui::Color32, String)> = Vec::new();
+    if let Some(bio) = u.biosphere(r) {
+        if bio.stage >= Stage::Microbial {
+            badges.push((super::icon::LEAF, LIFE, format!("Life: {:?}", bio.stage)));
+        }
+    }
     if let Some(c) = u.civ_on(r) {
-        text.push_str(&format!("  — {}", c.species.name));
+        badges.push((super::icon::BUILDINGS, CIV, format!("{} — {}", c.name, c.species.name)));
     }
-    let mut rt = egui::RichText::new(text);
-    if let Some((_, color)) = life_glyph(u, r) {
-        rt = rt.color(color);
+    if u.civs.iter().any(|c| c.is_alive() && c.system == r.system && c.colonies.iter().any(|col| col.body == r.body)) {
+        badges.push((super::icon::FLAG, CIV, "Colony".into()));
     }
-    let resp = ui.selectable_label(sim.selected == Some(Target::Body(r)), rt);
+    let name_color = if b.exists() { TEXT } else { MUTED };
+    let resp = tree_row(ui, indent, sim.selected == Some(Target::Body(r)), disc, &b.name, name_color, &badges);
     if resp.clicked() {
         *action = Some(Action::Focus(Target::Body(r)));
     }

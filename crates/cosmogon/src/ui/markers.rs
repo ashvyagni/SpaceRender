@@ -85,10 +85,15 @@ pub fn draw_markers(
     let mut label = |painter: &egui::Painter, pos: egui::Pos2, text: &str, color: egui::Color32, font: &egui::FontId| {
         let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
         let rect = egui::Rect::from_min_size(pos + egui::vec2(9.0, -galley.size().y * 0.5), galley.size());
-        if label_boxes.iter().any(|r| r.intersects(rect)) {
+        // Keep a little air between labels so the globe never turns into a wall of text.
+        if label_boxes.iter().any(|r| r.expand2(egui::vec2(6.0, 3.0)).intersects(rect)) {
             return;
         }
         label_boxes.push(rect);
+        // Soft shadow: legible over bright clouds and ice.
+        let shadow = egui::Color32::from_black_alpha((color.a() as f32 * 0.75) as u8);
+        let sg = painter.layout_no_wrap(text.to_string(), font.clone(), shadow);
+        painter.galley(rect.min + egui::vec2(1.0, 1.0), sg, shadow);
         painter.galley(rect.min, galley, color);
     };
     let focus_sys = rig.focus.map(|f| f.system());
@@ -224,7 +229,9 @@ pub fn draw_markers(
             if is_capital {
                 painter.circle_stroke(sp, size + 3.0, egui::Stroke::new(1.5_f32, egui::Color32::from_rgba_unmultiplied(255, 255, 255, (200.0 * alpha) as u8)));
             }
-            if labels && (rank < 12 || is_capital) && tier >= Tier::Town && px > 140.0 {
+            // More names as the world fills the screen; capitals first among equals.
+            let budget = (px / 45.0).clamp(4.0, 40.0) as usize;
+            if labels && (rank < budget || (is_capital && rank < budget * 2)) && tier >= Tier::Town && px > 140.0 {
                 label(&painter, sp, &format!("{}{} · {}", if is_capital { "★ " } else { "" }, s.name, super::compact(s.population)), egui::Color32::from_rgba_unmultiplied(255, 225, 170, (255.0 * alpha) as u8), &small);
             }
         }

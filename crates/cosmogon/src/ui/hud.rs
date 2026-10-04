@@ -106,7 +106,11 @@ pub fn top_bar(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut si
             egui::Frame::new().fill(egui::Color32::from_rgb(16, 21, 33)).corner_radius(9).stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(32, 40, 58))).inner_margin(egui::Margin::symmetric(10, 3)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(icon::MAGNIFYING_GLASS).color(MUTED));
-                    let resp = ui.add(egui::TextEdit::singleline(&mut ui_state.search).hint_text("Search worlds, stars, civilizations…   ⌘K for commands").frame(false).desired_width(300.0));
+                    let resp = ui.add(egui::TextEdit::singleline(&mut ui_state.search).hint_text("Search worlds, stars, civilizations…").frame(false).desired_width(260.0));
+                    // Shortcut hint as a key cap, not squeezed into the placeholder.
+                    egui::Frame::new().fill(egui::Color32::from_rgb(28, 35, 52)).corner_radius(5).inner_margin(egui::Margin::symmetric(6, 1)).show(ui, |ui| {
+                        ui.label(egui::RichText::new(if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" }).size(11.0).color(MUTED));
+                    }).response.on_hover_text("Command palette");
                     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         let q = ui_state.search.trim().to_string();
                         let found = find_target(&sim, &q).or_else(|| sim.universe.civs.iter().find(|c| c.name.to_lowercase().contains(&q.to_lowercase())).map(|c| Target::Body(cosmogon_sim::BodyRef { system: c.system, body: c.body })));
@@ -221,18 +225,29 @@ pub fn bottom_bar(mut contexts: EguiContexts, ui_state: Res<UiState>, mut sim: R
             ui.separator();
             ui.checkbox(&mut settings.auto_slow, egui::RichText::new("auto-slow").size(11.0).color(MUTED)).on_hover_text("Slow down automatically for milestones");
             ui.separator();
-            // Recent notable events.
+            // Recent notable events, newest first, as compact chips.
             let events: Vec<_> = sim.universe.history.events.iter().rev().filter(|e| e.importance >= 4).take(3).cloned().collect();
             ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
                 for e in events {
-                    let color = match e.category {
-                        cosmogon_sim::history::Category::Life => LIFE,
-                        cosmogon_sim::history::Category::Technology | cosmogon_sim::history::Category::Civilization => CIV,
-                        cosmogon_sim::history::Category::Disaster | cosmogon_sim::history::Category::War => super::DANGER,
-                        _ => TEXT,
+                    use cosmogon_sim::history::Category as C;
+                    let (glyph, color) = match e.category {
+                        C::Life => (icon::LEAF, LIFE),
+                        C::Technology => (icon::LIGHTBULB, CIV),
+                        C::Civilization => (icon::BUILDINGS, CIV),
+                        C::Space => (icon::ROCKET_LAUNCH, CIV),
+                        C::Contact => (icon::BROADCAST, CIV),
+                        C::Disaster => (icon::WARNING, super::DANGER),
+                        C::War => (icon::SWORD, super::DANGER),
+                        C::Astronomy => (icon::STAR, TEXT),
                     };
-                    let text = egui::RichText::new(format!("{}  {}", cosmogon_sim::time::format_date(e.time, sim.universe.start_time, sim.universe.gregorian()), e.title)).size(11.5).color(color);
-                    if ui.add(egui::Label::new(text).sense(egui::Sense::click()).truncate()).on_hover_text(&e.detail).clicked() {
+                    let resp = ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(glyph).size(12.0).color(color));
+                        ui.label(egui::RichText::new(cosmogon_sim::time::format_date(e.time, sim.universe.start_time, sim.universe.gregorian())).size(10.5).color(MUTED));
+                        ui.add(egui::Label::new(egui::RichText::new(&e.title).size(11.5).color(color)).truncate());
+                    });
+                    let resp = resp.response.interact(egui::Sense::click()).on_hover_text(&e.detail);
+                    if resp.clicked() {
                         if let (Some(s), Some(b)) = (e.system, e.body) {
                             let t = Target::Body(cosmogon_sim::BodyRef { system: s, body: b });
                             sim.selected = Some(t);
