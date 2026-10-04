@@ -368,6 +368,7 @@ pub fn overlays_windows(
                     ("Space", "Pause / resume"),
                     (", and .", "Slower / faster"),
                     ("Tab", "Hide the interface"),
+                    ("P", "Photo: save a clean screenshot to Pictures/Cosmogon"),
                     ("Ctrl/⌘ + S", "Save sandbox"),
                     ("Ctrl/⌘ + Z / ⇧Z", "Undo / redo an edit"),
                     ("Ctrl/⌘ + K", "Command palette"),
