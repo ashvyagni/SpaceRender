@@ -189,6 +189,10 @@ impl ObjectClass {
         match self {
             GasGiant => BodyKind::GasGiant,
             IceGiant => BodyKind::IceGiant,
+            MainSequenceStar | Protostar | BrownDwarf | GiantStar => BodyKind::Star,
+            WhiteDwarf => BodyKind::WhiteDwarf,
+            NeutronStar | Pulsar | Magnetar => BodyKind::NeutronStar,
+            StellarBlackHole | IntermediateBlackHole | SupermassiveBlackHole => BodyKind::BlackHole,
             IceWorld | Comet | Centaur | TransNeptunianObject => BodyKind::Icy,
             _ => BodyKind::Rocky,
         }
@@ -204,6 +208,13 @@ pub fn infer_class(body: &Body) -> ObjectClass {
         return ObjectClass::Moon;
     }
     match body.kind {
+        BodyKind::Star if body.mass < 0.08 * super::SOLAR_MASS => ObjectClass::BrownDwarf,
+        BodyKind::Star => ObjectClass::MainSequenceStar,
+        BodyKind::WhiteDwarf => ObjectClass::WhiteDwarf,
+        BodyKind::NeutronStar => ObjectClass::Pulsar,
+        BodyKind::BlackHole if body.mass > 1e5 * super::SOLAR_MASS => ObjectClass::SupermassiveBlackHole,
+        BodyKind::BlackHole if body.mass > 100.0 * super::SOLAR_MASS => ObjectClass::IntermediateBlackHole,
+        BodyKind::BlackHole => ObjectClass::StellarBlackHole,
         BodyKind::GasGiant => ObjectClass::GasGiant,
         BodyKind::IceGiant => ObjectClass::IceGiant,
         BodyKind::Icy if body.mass < 0.01 * EARTH_MASS => ObjectClass::DwarfPlanet,

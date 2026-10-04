@@ -39,4 +39,5 @@ pub mod time;
 pub mod universe;
 
 pub use cosmogon_core::math::Vec3d;
+pub use cosmogon_core::units::kelvin_to_rgb;
 pub use universe::{BodyRef, Scenario, Universe, UniverseSettings};

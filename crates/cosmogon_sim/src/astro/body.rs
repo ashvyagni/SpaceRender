@@ -1,5 +1,8 @@
 //! Planets, moons and dwarf bodies.
 
+#[allow(unused_imports)]
+use cosmogon_core::dmath::DMath;
+
 use serde::{Deserialize, Serialize};
 
 use super::{Orbit, EARTH_MASS, EARTH_RADIUS, G};
@@ -14,6 +17,12 @@ pub enum BodyKind {
     GasGiant,
     /// Water/ammonia/methane-rich giant.
     IceGiant,
+    /// A star moving through the system (sandbox): gravity and light of its own.
+    Star,
+    /// Compact stellar remnants.
+    WhiteDwarf,
+    NeutronStar,
+    BlackHole,
 }
 
 impl BodyKind {
@@ -23,7 +32,18 @@ impl BodyKind {
             Self::Icy => "Icy world",
             Self::GasGiant => "Gas giant",
             Self::IceGiant => "Ice giant",
+            Self::Star => "Star",
+            Self::WhiteDwarf => "White dwarf",
+            Self::NeutronStar => "Neutron star",
+            Self::BlackHole => "Black hole",
         }
+    }
+    /// Stars and stellar remnants (no surface, no climate, no life).
+    pub fn is_stellar(self) -> bool {
+        matches!(self, Self::Star | Self::WhiteDwarf | Self::NeutronStar | Self::BlackHole)
+    }
+    pub fn is_compact(self) -> bool {
+        matches!(self, Self::WhiteDwarf | Self::NeutronStar | Self::BlackHole)
     }
     pub fn has_surface(self) -> bool {
         matches!(self, Self::Rocky | Self::Icy)
@@ -271,6 +291,10 @@ pub struct Body {
     /// Transient surface cooling after a large impact.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub impact_winter: Option<crate::impact::ImpactWinter>,
+    /// Accretion rate of a compact object as a fraction of its Eddington limit (0 = quiet;
+    /// visual: a glowing accretion disk).
+    #[serde(default)]
+    pub accretion: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -292,6 +316,17 @@ pub struct Removal {
 }
 
 impl Body {
+    /// Distance (m) within which this body captures others in collisions. For compact
+    /// objects that is the tidal-disruption radius of an Earth-density body,
+    /// r_t ≈ R⊕ (M / M⊕)^⅓ (≈ 4×10⁸ m for 1 M☉), not the tiny physical size.
+    pub fn interaction_radius(&self) -> f64 {
+        if self.kind.is_compact() {
+            self.radius.max(super::EARTH_RADIUS * (self.mass / super::EARTH_MASS).dcbrt())
+        } else {
+            self.radius
+        }
+    }
+
     pub fn mu(&self) -> f64 {
         G * self.mass
     }

@@ -54,6 +54,10 @@ pub fn greenhouse_tau(body: &Body, water_vapour: bool) -> f64 {
 pub fn update_climate(body: &mut Body, star: &Star, t: f64, stellar_distance_m: f64) {
     let lum = star.luminosity(t);
     let d_au = stellar_distance_m / AU;
+    if body.kind.is_stellar() {
+        // Stars and remnants keep their own temperature (set when created).
+        return;
+    }
     if !body.kind.has_surface() {
         body.equilibrium_temperature = equilibrium_temperature(lum, d_au, body.albedo);
         // Giants radiate internal heat; quote a 1-bar-level temperature.

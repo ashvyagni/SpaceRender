@@ -127,7 +127,7 @@ impl Universe {
                 continue;
             }
             match s.phase(self.time) {
-                StellarPhase::Giant => return k_now + 1,
+                StellarPhase::Giant => return k_now,
                 _ => next = next.min(s.giant_onset()).min(s.end_of_life()),
             }
         }
@@ -158,11 +158,15 @@ impl Universe {
             }
         }
         self.propagate_blasts(t);
-        let giant = self.systems.iter().any(|x| x.star.kind == StarKind::Normal && x.star.phase(t) == StellarPhase::Giant);
-        if giant {
-            k + GIANT_CHECK_YEARS
-        } else {
+        // While a star is a giant, check every GIANT_CHECK_YEARS — but never step past the
+        // moment it ends.
+        let giants: Vec<f64> = self.systems.iter().filter(|x| x.star.kind == StarKind::Normal && x.star.phase(t) == StellarPhase::Giant).map(|x| x.star.end_of_life()).collect();
+        if giants.is_empty() {
             self.next_stellar_index().max(k + 1)
+        } else {
+            let end = giants.into_iter().fold(f64::INFINITY, f64::min);
+            let at_end = self.scheduler.index_at_or_after(TASK_STARS, end);
+            (k + GIANT_CHECK_YEARS).min(at_end).max(k + 1)
         }
     }
 
@@ -472,12 +476,12 @@ mod tests {
         u.advance_by(2000.0 * SECONDS_PER_YEAR);
         let sys = &u.systems[0];
         assert_eq!(sys.star.kind, StarKind::BlackHole);
-        // The red supergiant (~1000 R☉ ≈ 4.7 AU) swallows the inner system before it explodes.
+        // The red supergiant (~1400 R☉ ≈ 6.5 AU) swallows the inner system and Jupiter first.
         let earth = &sys.bodies[sys.find_body("Earth").unwrap()];
         assert!(matches!(earth.removed.unwrap().cause, RemovalCause::MergedInto(None)));
-        // 30 → ~9.5 M☉ in an instant: more than half the mass gone, so Jupiter is unbound.
-        let jupiter = &sys.bodies[sys.find_body("Jupiter").unwrap()];
-        assert!(matches!(jupiter.removed.map(|r| r.cause), Some(RemovalCause::Ejected)), "{:?}", jupiter.removed);
+        // 30 → ~9.5 M☉ in an instant: more than half the mass gone, so Saturn is unbound.
+        let saturn = &sys.bodies[sys.find_body("Saturn").unwrap()];
+        assert!(matches!(saturn.removed.map(|r| r.cause), Some(RemovalCause::Ejected)), "{:?}", saturn.removed);
         assert!(u.history.events.iter().any(|e| e.title.starts_with("Supernova!")));
         let _ = SECONDS_PER_GYR;
     }
@@ -490,5 +494,24 @@ mod tests {
         // Sedov phase grows slower than free expansion.
         assert!(n.radius(10_000.0 * yr) < 1e7 * 10_000.0 * yr * 0.5);
         assert!(n.brightness(200_000.0 * yr) == 0.0);
+    }
+}
+
+#[cfg(test)]
+mod what_if_tests {
+    use crate::sandbox::apply_what_if;
+    use crate::time::SECONDS_PER_YEAR;
+    use crate::{Scenario, Universe, UniverseSettings};
+
+    #[test]
+    fn the_supernova_experiment_explodes_within_decades() {
+        let mut u = Universe::new(UniverseSettings { scenario: Scenario::SolarSystemLab, ..Default::default() });
+        apply_what_if(&mut u, "sun_supernova").unwrap();
+        u.advance_by(60.0 * SECONDS_PER_YEAR);
+        let s = &u.systems[0];
+        assert!(s.star.kind != crate::astro::star::StarKind::Normal, "still {:?} phase {:?}", s.star.kind, s.star.phase(u.time));
+        assert!(!s.nebulae.is_empty());
+        let r = s.nebulae[0].radius(u.time) / crate::astro::AU;
+        assert!(r > 20.0, "remnant radius {r} AU");
     }
 }

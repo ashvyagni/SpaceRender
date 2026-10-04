@@ -239,7 +239,10 @@ impl Star {
             // Brightens ~70% -> ~135% of the characteristic value across the main sequence;
             // calibrated so the present-day Sun (f ≈ 0.46) has L ≈ 1.
             StellarPhase::MainSequence => self.luminosity_ms * (0.72 + 0.62 * f),
-            StellarPhase::Giant => self.luminosity_ms * (1.34 + 2000.0 * (f - 1.0)),
+            // Brightening up the giant branch: ×~1800 for Sun-like stars (the Sun peaks near
+            // 2400 L☉ at the tip), barely ×3 for massive stars, which cross the HR diagram at
+            // nearly constant luminosity as they swell into supergiants.
+            StellarPhase::Giant => self.luminosity_ms * 1.34 * self.giant_growth().dpowf(((f - 1.0) / (END_OF_LIFE - 1.0)).clamp(0.0, 1.0)),
             // Cooling white dwarf (Mestel: L ∝ t^-7/5), ~0.01 L☉ at 100 Myr.
             StellarPhase::WhiteDwarf => (0.01 * (self.remnant_age(t) / (0.1 * SECONDS_PER_GYR)).max(1e-3).dpowf(-1.4)).clamp(1e-5, 1.0),
             // Thermal emission of a cooling neutron star is negligible in visible light.
@@ -252,15 +255,24 @@ impl Star {
         match self.phase(t) {
             StellarPhase::MainSequence => self.radius * (0.9 + 0.2 * self.life_fraction(t).clamp(0.0, 1.0)),
             // Red giants reach ~200 R☉ (≈1 AU for the Sun); supergiants ~1000 R☉.
+            // Radius follows luminosity up the branch (R ∝ L^0.6), reaching ~220 R☉ (≈1 AU)
+            // for the Sun and ~1400 R☉ for red supergiants.
             StellarPhase::Giant => {
-                let cap = if self.mass >= 8.0 { 1000.0 } else { 220.0 } * SOLAR_RADIUS / self.radius;
-                self.radius * (1.0 + (cap - 1.0) * ((self.life_fraction(t) - 1.0) / (END_OF_LIFE - 1.0)).clamp(0.0, 1.0).dpowf(1.5))
+                let cap = if self.mass >= 8.0 { 1400.0 } else { 220.0 } * SOLAR_RADIUS;
+                let tip = self.luminosity_ms * 1.34 * self.giant_growth();
+                (cap * (self.luminosity(t) / tip).dpowf(0.6)).max(self.radius * 1.1)
             }
             // Mass–radius relation of white dwarfs (smaller when heavier): ~0.012 R☉ at 0.6 M☉.
             StellarPhase::WhiteDwarf => 0.0125 * SOLAR_RADIUS * (self.remnant_mass() / 0.6).dpowf(-1.0 / 3.0),
             StellarPhase::NeutronStar => 12_000.0,
             StellarPhase::BlackHole => schwarzschild_radius(self.remnant_mass()),
         }
+    }
+
+    /// Luminosity growth factor from the end of the main sequence to the giant tip.
+    fn giant_growth(&self) -> f64 {
+        let x = ((self.mass.max(0.5).dln() - 2.0f64.dln()) / (8.0f64.dln() - 2.0f64.dln())).clamp(0.0, 1.0);
+        (1800.0f64.dln() * (1.0 - x) + 3.0f64.dln() * x).dexp()
     }
 
     /// Mass now (M☉): the remnant's mass once the star has ended.

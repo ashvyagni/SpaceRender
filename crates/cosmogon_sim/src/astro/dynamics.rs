@@ -269,7 +269,7 @@ impl StarSystem {
                 // Moons on rails are massless test bodies; their mass rides with the parent
                 // particle, which then stands for the planet-system barycentre.
                 let rails: f64 = self.bodies.iter().enumerate().filter(|(m, x)| x.parent == Some(i as u32) && x.exists() && d.bodies[*m].is_none()).map(|(_, x)| x.mu()).sum();
-                ps.push(Particle::new(s.pos, s.vel, b.mu() + rails, b.radius));
+                ps.push(Particle::new(s.pos, s.vel, b.mu() + rails, b.interaction_radius()));
                 slots.push(Slot::Body(i as u32));
             }
         }
@@ -457,6 +457,32 @@ impl StarSystem {
     fn apply_merges(&mut self, contacts: &[ContactEvent], ps: &[Particle], slots: &[Slot]) {
         for c in contacts {
             let k = slots.iter().position(|s| *s == c.survivor).expect("survivor slot");
+            // Something heavier than the star swallowed it (a black hole passing through):
+            // that object becomes the system's centre, carrying the merged mass and motion.
+            if let (Slot::Star, Slot::Body(i)) = (c.absorbed, c.survivor) {
+                let i = i as usize;
+                let b = &self.bodies[i];
+                let total = ps[k].gm / G / super::SOLAR_MASS;
+                let kind = match b.kind {
+                    super::BodyKind::BlackHole => super::star::StarKind::BlackHole,
+                    super::BodyKind::NeutronStar => super::star::StarKind::NeutronStar,
+                    super::BodyKind::WhiteDwarf => super::star::StarKind::WhiteDwarf,
+                    _ => super::star::StarKind::Normal,
+                };
+                let t = c.contact.time;
+                let name = b.name.clone();
+                self.star = if kind == super::star::StarKind::Normal {
+                    super::Star::from_mass(name, total, self.star.metallicity, t)
+                } else {
+                    super::Star::compact(name, kind, total, t)
+                };
+                if let Some(d) = self.dynamics.as_mut() {
+                    d.star = State { pos: ps[k].pos, vel: ps[k].vel };
+                    d.bodies[i] = None;
+                }
+                self.bodies[i].removed = Some(super::Removal { time: t, cause: super::RemovalCause::MergedInto(None) });
+                continue;
+            }
             let survivor_index = match c.survivor {
                 Slot::Body(i) => Some(i),
                 _ => None,

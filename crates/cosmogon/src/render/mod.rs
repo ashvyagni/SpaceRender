@@ -13,6 +13,7 @@ pub mod bake;
 pub mod look;
 pub mod materials;
 pub mod overlays;
+pub mod stellar;
 mod sky;
 pub mod terrain_lod;
 
@@ -80,6 +81,8 @@ pub struct StarVisual {
     pub system: u32,
     pub companion: bool,
     pub radius: f64,
+    /// The star's state when the visual was built (rebuilt when it changes).
+    pub kind: cosmogon_sim::astro::star::StarKind,
 }
 
 #[derive(Component)]
@@ -89,6 +92,8 @@ pub struct BodyVisual {
     pub level: u8,
     pub signature: u64,
     pub lights_baked_at: f64,
+    /// A star or stellar remnant (drawn by `stellar`, never hidden for being small).
+    pub stellar: bool,
     /// How the body looks (chosen once per appearance; rebuilt when it changes).
     pub look: std::sync::Arc<Look>,
 }
@@ -146,7 +151,16 @@ impl Plugin for RenderPlugin {
                 )
                     .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
             )
-            .add_plugins(overlays::OverlayPlugin);
+            .add_plugins(overlays::OverlayPlugin)
+            .add_plugins(stellar::StellarPlugin)
+            .add_systems(
+                Update,
+                (
+                    (stellar::sync_primaries, stellar::update_star_sizes).chain().in_set(Frame::Positions),
+                    (stellar::spin_pulsars, stellar::update_compact_objects, stellar::sync_nebulae).chain().in_set(Frame::Apply).after(apply_origin),
+                )
+                    .run_if(in_state(AppState::Observing).and(resource_exists::<Sim>)),
+            );
         // Created at build time: the initial state's OnEnter runs before Startup systems.
         let (s, t) = app.world().resource::<UserSettings>().graphics.sphere_segments();
         let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -275,6 +289,8 @@ fn appearance_key(body: &Body) -> u64 {
     body.color.iter().for_each(|c| c.to_bits().hash(&mut h));
     body.rings.is_some().hash(&mut h);
     body.removed.is_some().hash(&mut h);
+    body.accretion.to_bits().hash(&mut h);
+    ((body.mass.log10() * 20.0) as i64).hash(&mut h);
     if let Some((c, s)) = atmosphere_look(body) {
         c.iter().for_each(|x| x.to_bits().hash(&mut h));
         ((s * 20.0).round() as i32).hash(&mut h);
@@ -413,7 +429,7 @@ fn spawn_body(
         // Hidden until positioned (otherwise it is drawn for a frame at the camera).
         Visibility::Hidden,
         WorldPos::default(),
-        BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0, look: look.clone() },
+        BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0, stellar: false, look: look.clone() },
         SimVisual,
     ));
     e.with_children(|p| {
@@ -449,6 +465,10 @@ fn sync_body_visuals(
     mut planet_mats: ResMut<Assets<PlanetMaterial>>,
     mut atmo_mats: ResMut<Assets<AtmosphereMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    sky: Res<SkyHandle>,
+    mut star_mats: ResMut<Assets<StarMaterial>>,
+    mut hole_mats: ResMut<Assets<stellar::BlackHoleMaterial>>,
+    mut beam_mats: ResMut<Assets<stellar::BeamMaterial>>,
 ) {
     let u = &sim.universe;
     for sys in &u.systems {
@@ -463,7 +483,27 @@ fn sync_body_visuals(
                 }
                 None => {}
             }
-            if body.exists() {
+            if body.exists() && body.kind.is_stellar() {
+                let look = std::sync::Arc::new(Look::of(body));
+                let seed = (body.terrain_seed % 997) as f32;
+                let e = commands
+                    .spawn((
+                        Transform::from_scale(Vec3::splat(body.radius as f32)),
+                        Visibility::Inherited,
+                        WorldPos::default(),
+                        BodyVisual { r, radius: body.radius, level: 0, signature: 0, lights_baked_at: -10.0, stellar: true, look },
+                        stellar::StellarBody,
+                        SimVisual,
+                    ))
+                    .with_children(|p| {
+                        stellar::spawn_stellar_children(p, body.kind, body.mass / cosmogon_sim::astro::SOLAR_MASS, body.radius, body.temperature, body.accretion, seed, &shared, &mut meshes, &mut star_mats, &mut hole_mats, &mut beam_mats, &sky.0);
+                    })
+                    .id();
+                if body.kind == cosmogon_sim::astro::BodyKind::NeutronStar {
+                    commands.entity(e).insert(stellar::PulsarSpin { period: body.rotation_period });
+                }
+                spawned.0.insert(r, (e, key));
+            } else if body.exists() {
                 let e = spawn_body(&mut commands, r, body, &shared, &mut meshes, &mut ring_mats, &mut planet_mats, &mut atmo_mats, &mut images);
                 spawned.0.insert(r, (e, key));
             }
@@ -478,11 +518,16 @@ fn sync_body_visuals(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_universe(
     mut commands: Commands,
     sim: Res<Sim>,
     shared: Res<SharedMeshes>,
+    sky: Res<SkyHandle>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut star_mats: ResMut<Assets<StarMaterial>>,
+    mut hole_mats: ResMut<Assets<stellar::BlackHoleMaterial>>,
+    mut beam_mats: ResMut<Assets<stellar::BeamMaterial>>,
     mut spawned: ResMut<SpawnedBodies>,
 ) {
     let u = &sim.universe;
@@ -491,15 +536,7 @@ fn spawn_universe(
     for sys in &u.systems {
         let stars = std::iter::once((&sys.star, false)).chain(sys.companion.as_ref().map(|c| (&c.star, true)));
         for (star, companion) in stars {
-            let mat = star_mats.add(StarMaterial { u: star_uniform(star, t, sys.id as f32 * 7.3 + companion as u8 as f32) });
-            commands.spawn((
-                Mesh3d(shared.sphere.clone()),
-                MeshMaterial3d(mat),
-                Transform::default(),
-                WorldPos::default(),
-                StarVisual { system: sys.id, companion, radius: star.current_radius(t) },
-                SimVisual,
-            ));
+            stellar::spawn_primary(&mut commands, sys.id, companion, star, t, &shared, &mut meshes, &mut star_mats, &mut hole_mats, &mut beam_mats, &sky.0);
         }
     }
     // Bodies are built by `sync_body_visuals` (also used when the sandbox changes).
@@ -514,8 +551,14 @@ fn star_uniform(star: &cosmogon_sim::astro::Star, t: f64, seed: f32) -> StarUnif
     let k = 60.0 * lum;
     let teff = star.temperature_at(t);
     let limb = (0.85 - (teff as f32 - 3500.0) / 12000.0).clamp(0.35, 0.85);
-    let spots = ((6200.0 - teff as f32) / 3000.0).clamp(0.0, 0.9) * 0.6 + 0.1 * star.flare_activity_at(t) as f32;
-    StarUniform { color: Vec4::new(c[0] * k, c[1] * k, c[2] * k, 1.0), params: Vec4::new(0.0, spots, limb, seed), center: Vec4::ZERO }
+    // Starspots on cool dwarfs; giants show giant convection cells instead.
+    let giant = star.phase(t) == cosmogon_sim::astro::star::StellarPhase::Giant;
+    let spots = if giant { 0.0 } else { ((6200.0 - teff as f32) / 3000.0).clamp(0.0, 0.9) * 0.6 + 0.1 * star.flare_activity_at(t) as f32 };
+    // Convection cells: tens of thousands of small granules on the Sun, a few giant cells
+    // on red supergiants (Betelgeuse shows only a handful).
+    let r_sun = star.current_radius(t) / cosmogon_sim::astro::SOLAR_RADIUS;
+    let cells = (60.0 * r_sun.max(0.01).powf(-0.35)).clamp(4.0, 90.0) as f32;
+    StarUniform { color: Vec4::new(c[0] * k, c[1] * k, c[2] * k, 1.0), params: Vec4::new(0.0, spots, limb, seed), center: Vec4::new(0.0, 0.0, 0.0, cells) }
 }
 
 fn update_star_materials(sim: Res<Sim>, time: Res<Time>, view: Res<ViewInfo>, q: Query<(&StarVisual, &WorldPos, &MeshMaterial3d<StarMaterial>)>, mut mats: ResMut<Assets<StarMaterial>>) {
@@ -528,9 +571,18 @@ fn update_star_materials(sim: Res<Sim>, time: Res<Time>, view: Res<ViewInfo>, q:
             mat.u = star_uniform(star, u.time, seed);
             // A point of light needs to be very bright for the glare; a resolved disc is
             // dimmed towards the display range so limb darkening and granulation show.
+            // A resolved disc shows its *surface* brightness (cooler stars are dimmer per
+            // area, compressed as T² so red giants read as glowing orange-red).
             let px = view.screen_radius(wp.0, s.radius);
-            let k = 1.0 - ((px - 4.0) / 120.0).clamp(0.0, 1.0) * 0.93;
-            mat.u.color = (mat.u.color.truncate() * k).extend(1.0);
+            let resolved = ((px - 4.0) / 120.0).clamp(0.0, 1.0);
+            let point = mat.u.color.truncate();
+            let teff = star.temperature_at(u.time);
+            let c = star.color(u.time);
+            // Saturate the blackbody tint (the tonemapper desaturates bright light).
+            let sat = Vec3::new(c[0] * c[0], c[1] * c[1], c[2] * c[2]);
+            let sat = sat / sat.max_element().max(1e-3);
+            let disc = sat * (4.2 * (teff / 5772.0).powi(2)) as f32;
+            mat.u.color = point.lerp(disc, resolved).extend(1.0);
             mat.u.params.x = (time.elapsed_secs_f64() % 100_000.0) as f32;
         }
     }
@@ -585,11 +637,16 @@ fn apply_origin(view: Res<ViewInfo>, mut q: Query<(&WorldPos, &mut Transform, Op
         let rel = wp.0 - view.origin;
         tf.translation = rel.as_vec3();
         if let Some(s) = star {
-            // Keep stars visible as bright points at any distance (bloom does the rest).
+            use cosmogon_sim::astro::star::StarKind;
+            // Keep luminous stars visible as bright points at any distance (bloom does the
+            // rest); black holes and neutron stars are drawn at their true size.
             let d = rel.length();
-            tf.scale = Vec3::splat(s.radius.max(d * 0.0018) as f32);
+            tf.scale = Vec3::splat(match s.kind {
+                StarKind::Normal | StarKind::WhiteDwarf => s.radius.max(d * 0.0018),
+                _ => s.radius,
+            } as f32);
         }
-        if let Some(b) = body {
+        if let Some(b) = body.filter(|b| !b.stellar) {
             let px = view.screen_radius(wp.0, b.radius);
             let want = if px > 0.35 { Visibility::Inherited } else { Visibility::Hidden };
             if *vis != want {
@@ -733,7 +790,7 @@ fn request_bakes(
     sim: Res<Sim>,
     view: Res<ViewInfo>,
     settings: Res<UserSettings>,
-    q: Query<(Entity, &BodyVisual, &WorldPos), Without<PendingBake>>,
+    q: Query<(Entity, &BodyVisual, &WorldPos), (Without<PendingBake>, Without<stellar::StellarBody>)>,
     pending: Query<(), With<PendingBake>>,
 ) {
     let mut in_flight = pending.iter().count();

@@ -344,11 +344,12 @@ pub fn begin_new(commands: &mut Commands, next: &mut NextState<AppState>, n: New
     let NewSandbox { settings, advance_years, name, description, template, what_if, persist } = n;
     let task = AsyncComputeTaskPool::get().spawn(async move {
         let mut u = Universe::new(settings);
-        if advance_years > 0.0 {
-            u.advance_by(advance_years * SECONDS_PER_YEAR);
-        }
+        // Experiments start "now"; any fast-forward then shows what follows from them.
         if let Some(w) = &what_if {
             cosmogon_sim::sandbox::apply_what_if(&mut u, w)?;
+        }
+        if advance_years > 0.0 {
+            u.advance_by(advance_years * SECONDS_PER_YEAR);
         }
         let mut m = Manifest::new(&name, &description, &template, Origin::default());
         if u.systems.iter().any(|s| s.bodies.iter().any(|b| b.provenance.source.contains("Horizons"))) {

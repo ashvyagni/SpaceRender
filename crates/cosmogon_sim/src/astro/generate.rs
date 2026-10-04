@@ -292,6 +292,7 @@ fn make_body(
         BodyKind::Icy => 1.2 * rocky_radius(mass_e),
         BodyKind::GasGiant => giant_radius(mass_e, false),
         BodyKind::IceGiant => giant_radius(mass_e, true),
+        _ => unreachable!("planet generator only makes planets"),
     };
     let mass = mass_e * EARTH_MASS;
     let radius = radius_e * EARTH_RADIUS;
@@ -401,8 +402,9 @@ fn make_body(
             let rust = (0.3 + 0.4 * rng.f64()) as f32;
             [0.45 + 0.25 * rust, 0.4 + 0.08 * rust, 0.35]
         }
+        _ => unreachable!("planet generator only makes planets"),
     };
-    let rings = if !kind.has_surface() && rng.chance(0.3) {
+    let rings = if matches!(kind, BodyKind::GasGiant | BodyKind::IceGiant) && rng.chance(0.3) {
         Some(Rings { inner: radius * rng.range(1.25, 1.6), outer: radius * rng.range(1.9, 2.6), opacity: rng.range(0.1, 0.9) })
     } else {
         None
@@ -444,6 +446,7 @@ fn make_body(
         impacts: Vec::new(),
         impact_winter: None,
         elevation_data: None,
+        accretion: 0.0,
     };
     update_climate(&mut body, star, 0.0, stellar_a_au * AU);
     if garden {

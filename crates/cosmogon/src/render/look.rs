@@ -484,6 +484,9 @@ impl Look {
                 _ => {}
             }
         }
+        if body.kind.is_stellar() {
+            return plain(Style::Terran, body.kind.label());
+        }
         let t = body.temperature;
         let atmo = &body.atmosphere;
         match body.kind {

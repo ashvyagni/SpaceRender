@@ -74,6 +74,9 @@ pub enum StarProperty {
     /// s
     Age(f64),
     Name(String),
+    /// Replace the star by a remnant of the same mass (a thought experiment: what if the
+    /// Sun were a black hole?) or, with `Normal`, a living star again.
+    Kind(crate::astro::star::StarKind),
 }
 
 /// A user modification of a sandbox.
@@ -146,6 +149,13 @@ pub const PRESETS: &[Preset] = &[
     Preset { id: "asteroid_1km", label: "Asteroid, 1 km", class: ObjectClass::Asteroid, analogue: None, description: "Stony asteroid, 2 600 kg/m³. Regional devastation on impact." },
     Preset { id: "asteroid_10km", label: "Asteroid, 10 km (Chicxulub-class)", class: ObjectClass::Asteroid, analogue: None, description: "The size of the impactor that ended the dinosaurs." },
     Preset { id: "comet_5km", label: "Comet nucleus, 5 km", class: ObjectClass::Comet, analogue: None, description: "Ice and dust, 600 kg/m³. Comets strike faster than asteroids." },
+    Preset { id: "sun_like_star", label: "Sun-like star", class: ObjectClass::MainSequenceStar, analogue: None, description: "1 M☉, G2V, 5772 K. A second sun: double sunsets, tangled orbits." },
+    Preset { id: "red_dwarf", label: "Red dwarf", class: ObjectClass::MainSequenceStar, analogue: None, description: "0.2 M☉ M dwarf, 3200 K — the most common kind of star." },
+    Preset { id: "brown_dwarf", label: "Brown dwarf", class: ObjectClass::BrownDwarf, analogue: None, description: "50 Jupiter masses: too light to fuse hydrogen; a dim, glowing failed star." },
+    Preset { id: "white_dwarf", label: "White dwarf", class: ObjectClass::WhiteDwarf, analogue: None, description: "0.6 M☉ squeezed into the size of Earth: a teaspoon weighs a tonne." },
+    Preset { id: "neutron_star", label: "Neutron star (pulsar)", class: ObjectClass::Pulsar, analogue: None, description: "1.4 M☉ in 12 km, spinning 30 times a second." },
+    Preset { id: "black_hole_1", label: "Black hole, 1 M☉", class: ObjectClass::StellarBlackHole, analogue: None, description: "The Sun's mass in a 3 km event horizon. Tears apart anything within ~0.003 AU." },
+    Preset { id: "black_hole_10", label: "Black hole, 10 M☉", class: ObjectClass::StellarBlackHole, analogue: None, description: "A typical stellar black hole from a massive star's collapse." },
 ];
 
 pub fn preset(id: &str) -> Option<&'static Preset> {
@@ -200,6 +210,38 @@ pub fn body_from_preset(p: &Preset, name: &str, seed: u64) -> Body {
             b.atmosphere = Default::default();
             b.hydro.water_inventory = 0.3;
             b.hydro.ice_fraction = 1.0;
+        }
+        "sun_like_star" | "red_dwarf" | "brown_dwarf" | "white_dwarf" | "neutron_star" | "black_hole_1" | "black_hole_10" => {
+            use crate::astro::{EARTH_RADIUS, SOLAR_RADIUS};
+            let (mass_sun, radius, temp, rot) = match p.id {
+                "sun_like_star" => (1.0, SOLAR_RADIUS, 5772.0, 25.4 * SECONDS_PER_DAY),
+                "red_dwarf" => (0.2, 0.23 * SOLAR_RADIUS, 3200.0, 3.0 * SECONDS_PER_DAY),
+                "brown_dwarf" => (0.048, 0.09 * SOLAR_RADIUS, 1300.0, 0.3 * SECONDS_PER_DAY),
+                "white_dwarf" => (0.6, 0.0125 * SOLAR_RADIUS, 15_000.0, 3600.0),
+                "neutron_star" => (1.4, 12_000.0, 600_000.0, 0.033),
+                "black_hole_1" => (1.0, crate::astro::star::schwarzschild_radius(1.0), 0.0, 1.0),
+                _ => (10.0, crate::astro::star::schwarzschild_radius(10.0), 0.0, 1.0),
+            };
+            let _ = EARTH_RADIUS;
+            b.kind = p.class.body_kind();
+            b.mass = mass_sun * SOLAR_MASS;
+            b.radius = radius;
+            b.temperature = temp;
+            b.equilibrium_temperature = temp;
+            b.rotation_period = rot;
+            b.axial_tilt = 0.1;
+            b.albedo = 0.0;
+            b.atmosphere = Default::default();
+            b.hydro = Default::default();
+            b.magnetic_field = if p.id == "neutron_star" { 2.0e12 } else { 0.0 };
+            // Presets show black holes feeding (as if from a companion's gas stream).
+            b.accretion = if b.kind == BodyKind::BlackHole { 0.3 } else { 0.0 };
+            b.geology = 0.0;
+            b.rings = None;
+            b.deposits.clear();
+            b.resources = Default::default();
+            let (r, g, bl) = cosmogon_core::units::kelvin_to_rgb(temp.clamp(1000.0, 40_000.0));
+            b.color = if b.kind == BodyKind::BlackHole { [0.0, 0.0, 0.0] } else { [r, g, bl] };
         }
         "asteroid_1km" | "asteroid_10km" | "comet_5km" => {
             let (r, rho) = match p.id {
@@ -275,7 +317,7 @@ pub fn warnings(u: &Universe, r: BodyRef) -> Vec<String> {
     let Some(b) = b.filter(|b| b.exists()) else { return Vec::new() };
     let mut w = Vec::new();
     let rho = b.density();
-    if rho > 25_000.0 {
+    if rho > 25_000.0 && !b.kind.is_stellar() {
         w.push(format!("Density {rho:.0} kg/m³ exceeds any ordinary planetary matter (iron ≈ 7 900; Earth's core ≈ 13 000)."));
     } else if rho < 300.0 && b.kind.has_surface() {
         w.push(format!("Density {rho:.0} kg/m³ is lower than any known solid body."));
@@ -291,7 +333,7 @@ pub fn warnings(u: &Universe, r: BodyRef) -> Vec<String> {
             Some(p) => roche_limit(sys.bodies[p as usize].radius, sys.bodies[p as usize].density(), rho),
             None => roche_limit(sys.star.current_radius(u.time), sys.star.mass * SOLAR_MASS / (4.0 / 3.0 * std::f64::consts::PI * sys.star.current_radius(u.time).powi(3)), rho),
         };
-        if dist < roche && b.mass > 1e15 {
+        if dist < roche && b.mass > 1e15 && !b.kind.is_compact() {
             w.push(format!("Inside the Roche limit of its parent ({:.0} km): tides would pull it apart (tidal disruption is not simulated yet).", roche / 1000.0));
         }
         if let Some(d) = &sys.dynamics {
@@ -372,8 +414,9 @@ fn validate(u: &Universe, e: &Edit) -> Result<(), String> {
         Edit::SetStar { property, .. } => match property {
             StarProperty::Mass(m) => {
                 finite_positive(*m, "Mass")?;
-                if !(0.08..=150.0).contains(m) {
-                    return Err("The stellar model covers 0.08–150 solar masses (brown dwarfs and black holes arrive in a later milestone)".into());
+                let compact = u.system(e.system()).star.kind != crate::astro::star::StarKind::Normal;
+                if !compact && !(0.08..=150.0).contains(m) {
+                    return Err("Living stars span 0.08–150 solar masses (lighter objects are brown dwarfs or planets; make it a black hole for anything heavier)".into());
                 }
             }
             StarProperty::Age(a) => finite_positive(*a, "Age")?,
@@ -413,6 +456,7 @@ fn describe(u: &Universe, e: &Edit) -> String {
                 StarProperty::Metallicity(z) => format!("Set metallicity of {s} to {z:+.2} dex"),
                 StarProperty::Age(a) => format!("Set age of {s} to {:.2} Gyr", a / (1e9 * SECONDS_PER_YEAR)),
                 StarProperty::Name(n) => format!("Renamed {s} to {n}"),
+                StarProperty::Kind(k) => format!("Turned {s} into a {}", k.label().to_lowercase()),
             }
         }
         Edit::SetPhysics { nbody, settings, .. } => {
@@ -588,16 +632,24 @@ impl Universe {
             Edit::SetStar { system, property } => {
                 let sys = &mut self.systems[system as usize];
                 let st = &sys.star;
-                let (mut mass, mut z, mut formed, mut name) = (st.mass, st.metallicity, st.formed_at, st.name.clone());
+                let (mut mass, mut z, mut formed, mut name, mut kind) = (st.mass, st.metallicity, st.formed_at, st.name.clone(), st.kind);
                 match property {
                     StarProperty::Mass(m) => mass = m,
                     StarProperty::Metallicity(v) => z = v,
                     StarProperty::Age(a) => formed = t - a,
                     StarProperty::Name(n) => name = n,
+                    StarProperty::Kind(k) => {
+                        kind = k;
+                        formed = t;
+                        if k == crate::astro::star::StarKind::Normal {
+                            mass = mass.clamp(0.08, 150.0);
+                            formed = t - 4.6e9 * SECONDS_PER_YEAR * mass.powf(-2.5).min(1.0) * 0.46;
+                        }
+                    }
                 }
                 // Physically consistent mode: radius, luminosity, temperature and lifetime
                 // follow from the stellar model.
-                sys.star = Star::from_mass(name, mass, z, formed);
+                sys.star = if kind == crate::astro::star::StarKind::Normal { Star::from_mass(name, mass, z, formed) } else { Star::compact(name, kind, mass, formed) };
                 affected.extend(sys.existing());
             }
             Edit::SetPhysics { system, nbody, settings } => {
@@ -628,6 +680,14 @@ impl Universe {
     }
 
     /// Recompute climate, resources and habitability of one body now.
+    pub(crate) fn refresh_system_climates(&mut self, s: usize, t: f64) {
+        for j in 0..self.systems[s].bodies.len() {
+            if self.systems[s].bodies[j].exists() {
+                self.refresh_body_environment(s, j, t);
+            }
+        }
+    }
+
     pub(crate) fn refresh_body_environment(&mut self, s: usize, j: usize, t: f64) {
         if !self.systems[s].bodies[j].exists() {
             return;
@@ -663,7 +723,12 @@ impl Universe {
     pub(crate) fn on_contact(&mut self, s: usize, ev: ContactEvent) {
         let t = ev.contact.time;
         let Slot::Body(j) = ev.absorbed else {
-            // A body heavier than its star: outside what the stellar model handles.
+            // The star itself was swallowed by something heavier (see Dynamics::apply_merges).
+            if let Slot::Body(i) = ev.survivor {
+                let who = self.systems[s].bodies[i as usize].name.clone();
+                self.history.push(Event { time: t, category: Category::Astronomy, importance: 5, title: format!("{who} swallows the star"), detail: format!("Now {:.2} M☉, it becomes the centre of the system; the planets orbit it instead.", self.systems[s].star.mass), system: Some(s as u32), body: None, civ: None });
+                self.refresh_system_climates(s, t);
+            }
             return;
         };
         let j = j as usize;
@@ -683,6 +748,18 @@ impl Universe {
                     civ: None,
                 });
                 self.on_body_destroyed(s, j, t, &format!("fell into {star}"));
+            }
+            Slot::Body(i) if self.systems[s].bodies[i as usize].kind.is_stellar() => {
+                let i = i as usize;
+                let who = self.systems[s].bodies[i].name.clone();
+                let kind = self.systems[s].bodies[i].kind;
+                let detail = match kind {
+                    BodyKind::BlackHole => "Stretched by tides far stronger than its own gravity, it is torn into a stream of gas (\"spaghettified\"); part spirals in, flaring in X-rays.",
+                    BodyKind::Star => "It plunges into the star and is vaporised.",
+                    _ => "Tidal forces shred it; the debris falls onto the dense remnant.",
+                };
+                self.history.push(Event { time: t, category: Category::Astronomy, importance: 5, title: format!("{imp_name} torn apart by {who}"), detail: detail.into(), system: Some(s as u32), body: Some(j as u32), civ: None });
+                self.on_body_destroyed(s, j, t, &format!("was torn apart by {who}"));
             }
             Slot::Body(i) => {
                 let i = i as usize;
@@ -1032,6 +1109,12 @@ pub const WHAT_IFS: &[WhatIf] = &[
     WhatIf { id: "rogue_planet", title: "What if a rogue planet passed through?", description: "An Earth-mass rogue world falls in from 40 AU on a path that crosses the inner Solar System." },
     WhatIf { id: "two_moons", title: "What if Earth had two moons?", description: "A second Moon-like body orbits Earth at twice the Moon's distance." },
     WhatIf { id: "mars_earth_air", title: "What if Mars had Earth's air?", description: "Mars gets a 1-bar nitrogen–oxygen atmosphere and some of its water back." },
+    WhatIf { id: "sun_black_hole", title: "What if the Sun became a black hole?", description: "Same mass, 3 km across: every orbit stays exactly the same — but the light goes out." },
+    WhatIf { id: "black_hole_flyby", title: "What if a black hole passed through?", description: "A 10 M☉ black hole falls in from 60 AU on a path through the inner Solar System." },
+    WhatIf { id: "sun_red_giant", title: "What if it were 7.6 billion years from now?", description: "The Sun near the tip of its red-giant phase, swelling towards 1 AU. Mercury and Venus are next." },
+    WhatIf { id: "sun_supernova", title: "What if the Sun were a dying supergiant?", description: "A 25 M☉ star at the very end of its life takes the Sun's place. Its gravity is 25× stronger, so the planets plunge inwards; within decades it explodes and leaves a black hole." },
+    WhatIf { id: "feeding_black_hole", title: "What if a black hole orbited the Sun?", description: "A 10 M☉ black hole feeding on gas circles at 30 AU, its disk blazing — and Neptune's orbit is in its way." },
+    WhatIf { id: "second_sun", title: "What if a second sun arrived?", description: "A Sun-like star approaches from 300 AU. Will the planets stay with their star — or follow the newcomer?" },
 ];
 
 fn find(u: &Universe, name: &str) -> Result<BodyRef, String> {
@@ -1099,6 +1182,42 @@ pub fn apply_what_if(u: &mut Universe, id: &str) -> Result<(), String> {
                 a.h2he = 0.0;
             }
             u.apply_edit(Edit::SetProperty { body: m, property: BodyProperty::WaterInventory(0.3) })?;
+        }
+        "sun_black_hole" => {
+            u.apply_edit(Edit::SetStar { system: 0, property: StarProperty::Kind(crate::astro::star::StarKind::BlackHole) })?;
+        }
+        "black_hole_flyby" | "second_sun" => {
+            let (pid, name, r0, v0, q) = if id == "black_hole_flyby" { ("black_hole_10", "Wanderer", 60.0 * AU, 15_000.0, 2.5 * AU) } else { ("sun_like_star", "Nemesis", 300.0 * AU, 6_000.0, 8.0 * AU) };
+            let mut body = body_from_preset(preset(pid).unwrap(), name, 0xB1AC);
+            // A lone wandering black hole has nothing to feed on: dark, seen only by lensing.
+            body.accretion = 0.0;
+            let sys = u.system(0);
+            let gm = sys.star.mu() + G * body.mass;
+            let energy = 0.5 * v0 * v0 - gm / r0;
+            let vq = (2.0 * (energy + gm / q)).sqrt();
+            let vt = q * vq / r0;
+            let vr = -(v0 * v0 - vt * vt).max(0.0).sqrt();
+            let dir = Vec3d::new(-0.6, 0.75, 0.12).normalize();
+            let side = Vec3d::new(0.0, 0.0, 1.0).cross(dir).normalize();
+            let star = sys.star_local_position(t);
+            let state = State { pos: star + dir * r0, vel: dir * vr + side * vt };
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "feeding_black_hole" => {
+            let body = body_from_preset(preset("black_hole_10").unwrap(), "Charon's Gate", 0xFEED);
+            let state = circular_state(u.system(0), None, body.mass, 30.0 * AU, 1.2, 0.05, t);
+            u.apply_edit(Edit::AddBody { system: 0, body: Box::new(body), state })?;
+        }
+        "sun_red_giant" => {
+            let s = &u.system(0).star;
+            let age = s.lifetime * 1.1185;
+            u.apply_edit(Edit::SetStar { system: 0, property: StarProperty::Age(age) })?;
+        }
+        "sun_supernova" => {
+            u.apply_edit(Edit::SetStar { system: 0, property: StarProperty::Mass(25.0) })?;
+            let life = u.system(0).star.lifetime;
+            // Decades before core collapse.
+            u.apply_edit(Edit::SetStar { system: 0, property: StarProperty::Age(life * crate::astro::star::END_OF_LIFE - 30.0 * SECONDS_PER_YEAR) })?;
         }
         other => return Err(format!("unknown experiment {other}")),
     }
@@ -1279,6 +1398,38 @@ mod tests {
         apply_what_if(&mut u, "chicxulub_today").unwrap();
         u.advance_by(5.0 * SECONDS_PER_DAY);
         assert!(!u.body(earth(&u)).impacts.is_empty());
+    }
+
+    #[test]
+    fn a_black_hole_sun_keeps_the_orbits_and_turns_out_the_light() {
+        // Gravity outside the horizon is the Sun's: Earth follows the same path as in an
+        // untouched Solar System.
+        let mut control = lab();
+        control.apply_edit(Edit::SetPhysics { system: 0, nbody: true, settings: control.system(0).dynamics.as_ref().unwrap().settings }).unwrap();
+        control.advance_by(1.0 * SECONDS_PER_YEAR);
+        let mut u = lab();
+        let e = earth(&u);
+        apply_what_if(&mut u, "sun_black_hole").unwrap();
+        u.advance_by(1.0 * SECONDS_PER_YEAR);
+        let p0 = control.body_position(e, control.time);
+        let p1 = u.body_position(e, u.time);
+        assert!((p1 - p0).length() < 1.0e6, "Earth's position differs by {} km", (p1 - p0).length() / 1000.0);
+        assert!(u.body(e).temperature < 100.0, "Earth without sunlight: {} K", u.body(e).temperature);
+        assert!(u.history.events.iter().any(|ev| ev.title.contains("black hole")));
+    }
+
+    #[test]
+    fn a_wandering_black_hole_wrecks_the_inner_system() {
+        let mut u = lab();
+        apply_what_if(&mut u, "black_hole_flyby").unwrap();
+        let earth_a0 = u.system(0).osculating(earth(&u).body as usize, u.time).semi_major_axis;
+        u.advance_by(40.0 * SECONDS_PER_YEAR);
+        let e = &u.system(0).bodies[earth(&u).body as usize];
+        let changed = !e.exists() || {
+            let el = u.system(0).osculating(earth(&u).body as usize, u.time);
+            !el.is_bound() || (el.semi_major_axis / earth_a0 - 1.0).abs() > 0.05
+        };
+        assert!(changed, "a 10 M☉ black hole passing at 2.5 AU must disturb Earth");
     }
 
     #[test]

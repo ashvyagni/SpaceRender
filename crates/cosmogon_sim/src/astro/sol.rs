@@ -162,6 +162,7 @@ pub fn sol_system() -> StarSystem {
             removed: None,
             impacts: Vec::new(),
             impact_winter: None,
+            accretion: 0.0,
             elevation_data: match sb.elevation_data.as_deref() {
                 Some("earth") => Some(crate::planet::terrain::ElevationData::Earth),
                 Some(other) => panic!("unknown elevation_data {other}"),
