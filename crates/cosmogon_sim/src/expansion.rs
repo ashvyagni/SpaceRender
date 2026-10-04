@@ -7,6 +7,7 @@
 //!   sight to the star, so the home climate is unaffected; from afar the star dims.
 //! * **Terraforming** (`terraform` flag): colony worlds get thicker nitrogen–oxygen air and
 //!   imported water over centuries; the climate model then decides whether seas form.
+//!   Only worlds with at least Mars's gravity (≥ 3 m/s²) can keep a breathable sky.
 //! * **Generation ships** (`starships` flag): once a probe has scouted another star and
 //!   found a world fit to live on, settlers follow at a fraction of the probe's speed. On
 //!   arrival they found a new branch of the civilization, which inherits its parent's
@@ -88,11 +89,13 @@ impl Universe {
         }
         // Terraforming the colonies.
         if self.civs[ci].flags.contains("terraform") {
-            let colonies: Vec<u32> = self.civs[ci].colonies.iter().map(|c| c.body).collect();
-            for b in colonies {
+            let colonies: Vec<(usize, u32)> = self.civs[ci].colonies.iter().enumerate().map(|(i, c)| (i, c.body)).collect();
+            for (col, b) in colonies {
                 let bi = b as usize;
                 let Some(body) = self.systems[s].bodies.get(bi) else { continue };
-                if !body.exists() || matches!(body.kind, BodyKind::GasGiant | BodyKind::IceGiant) || crate::astro::G * body.mass / (body.radius * body.radius) < 1.5 {
+                if !body.exists() || matches!(body.kind, BodyKind::GasGiant | BodyKind::IceGiant) || crate::astro::G * body.mass / (body.radius * body.radius) < 3.0 {
+                    // Too little gravity to hold a breathable atmosphere for long (the Moon,
+                    // Titan, Ganymede): domes, not skies.
                     continue;
                 }
                 let was = assess(&self.systems[s], bi, t).score;
@@ -115,7 +118,8 @@ impl Universe {
                 if first {
                     self.history.push(Event { time: t, category: Category::Technology, importance: 5, title: format!("Terraforming of {name} begins"), detail: format!("{civ} start thickening its air and importing water from icy bodies."), system: Some(s as u32), body: Some(b), civ: Some(ci as u32) });
                 }
-                if was < 0.5 && now >= 0.5 {
+                if was < 0.5 && now >= 0.5 && !self.civs[ci].colonies[col].terraformed {
+                    self.civs[ci].colonies[col].terraformed = true;
                     self.history.push(Event { time: t, category: Category::Life, importance: 5, title: format!("{name} is habitable"), detail: format!("After centuries of work by {civ}, people walk {name} without pressure suits."), system: Some(s as u32), body: Some(b), civ: Some(ci as u32) });
                 }
             }
@@ -265,7 +269,7 @@ mod tests {
         let mut u = sol();
         let ci = humanity(&u);
         let mars = (0..u.systems[0].bodies.len()).find(|&i| u.systems[0].bodies[i].name == "Mars").unwrap() as u32;
-        u.civs[ci].colonies.push(crate::civ::Colony { body: mars, founded: u.time, population: 1.0e5 });
+        u.civs[ci].colonies.push(crate::civ::Colony { body: mars, founded: u.time, population: 1.0e5, terraformed: false });
         u.civs[ci].flags.insert("terraform".into());
         let p0 = u.systems[0].bodies[mars as usize].atmosphere.pressure_bar;
         let t = u.time;

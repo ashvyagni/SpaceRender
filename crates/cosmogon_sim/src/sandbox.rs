@@ -1252,7 +1252,7 @@ pub fn apply_what_if(u: &mut Universe, id: &str) -> Result<(), String> {
                 c.grant(graph, id, t);
             }
             if !c.colonies.iter().any(|x| x.body == mars.body) {
-                c.colonies.push(crate::civ::Colony { body: mars.body, founded: t, population: 2.0e6 });
+                c.colonies.push(crate::civ::Colony { body: mars.body, founded: t, population: 2.0e6, terraformed: false });
             }
             c.dyson = 0.45;
             c.dyson_power_w = 0.45 * lum;

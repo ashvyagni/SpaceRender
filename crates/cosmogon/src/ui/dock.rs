@@ -54,7 +54,7 @@ pub fn tool_dock(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut 
     };
     let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(11, 14, 24, 238)).corner_radius(14).stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(36, 44, 62))).inner_margin(6).shadow(egui::epaint::Shadow { offset: [0, 6], blur: 22, spread: 0, color: egui::Color32::from_black_alpha(150) });
 
-    egui::Area::new(egui::Id::new("tool_shelf")).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -140.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("tool_shelf")).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -176.0)).order(egui::Order::Foreground).show(ctx, |ui| {
         ui.vertical_centered(|ui| {
             // The shelf, while throwing.
             if let Some(current) = throwing {
@@ -117,7 +117,7 @@ pub fn tool_dock(mut contexts: EguiContexts, mut ui_state: ResMut<UiState>, mut 
             }
         });
     });
-    egui::Area::new(egui::Id::new("tool_dock")).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -72.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("tool_dock")).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -108.0)).order(egui::Order::Foreground).show(ctx, |ui| {
         {
             frame.show(ui, |ui| {
                 ui.horizontal(|ui| {

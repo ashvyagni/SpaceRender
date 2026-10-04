@@ -139,7 +139,7 @@ pub fn tour_card(mut commands: Commands, mut contexts: EguiContexts, tour: Optio
     let mut close = false;
     // Bottom-left of the free 3D view (between the side panels), clear of the tool dock.
     let free = ctx.available_rect();
-    egui::Area::new(egui::Id::new("tour")).pivot(egui::Align2::LEFT_BOTTOM).fixed_pos(egui::pos2(free.left() + 16.0, free.bottom() - 104.0)).show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("tour")).pivot(egui::Align2::LEFT_BOTTOM).fixed_pos(egui::pos2(free.left() + 16.0, free.bottom() - 120.0)).show(ctx, |ui| {
         egui::Frame::new()
             .fill(PANEL.gamma_multiply(0.97))
             .stroke(egui::Stroke::new(1.0_f32, ACCENT_DIM))

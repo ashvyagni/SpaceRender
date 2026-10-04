@@ -86,6 +86,9 @@ pub struct Colony {
     pub body: u32,
     pub founded: f64,
     pub population: f64,
+    /// Terraforming has made the world habitable (announced once).
+    #[serde(default)]
+    pub terraformed: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

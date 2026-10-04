@@ -15,6 +15,7 @@ mod persistence;
 mod render;
 mod sim;
 mod state;
+mod timeline;
 mod ui;
 
 use bevy::prelude::*;
@@ -51,6 +52,7 @@ fn main() {
             camera::CameraPlugin,
             ui::UiPlugin,
             capture::CapturePlugin,
+            timeline::TimelinePlugin,
             interact::InteractPlugin,
         ))
         .run();

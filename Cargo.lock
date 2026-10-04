@@ -2150,6 +2150,7 @@ dependencies = [
  "cosmogon_sim",
  "dirs",
  "egui-phosphor",
+ "flate2",
  "image",
  "log",
  "serde",

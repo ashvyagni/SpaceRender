@@ -148,7 +148,7 @@ impl Civilization {
             match m.kind {
                 MissionKind::Colony => {
                     if !self.colonies.iter().any(|c| c.body == m.body) {
-                        self.colonies.push(Colony { body: m.body, founded: t, population: 50.0 });
+                        self.colonies.push(Colony { body: m.body, founded: t, population: 50.0, terraformed: false });
                         ev.push(CivEvent { importance: 5, category: C::Space, title: format!("Colony founded on {}", d.name), detail: format!("The colony ship {} lands; a permanent settlement begins.", m.name) });
                     }
                 }
