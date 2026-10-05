@@ -93,7 +93,7 @@ there · **Home** for the whole system · **Space** pause · **, .** speed · **
 **Esc** menu.
 
 ## Documentation
-[1.0 product plan](docs/PRODUCT_PLAN_1_0.md) · [Sandbox vision](docs/SANDBOX_VISION.md) · [Milestone S1 status](docs/MILESTONE_S1.md) · [G1 + C1](docs/MILESTONE_G1_C1.md) ·
+[HANDOFF (start here to contribute)](HANDOFF.md) · [1.0 product plan](docs/PRODUCT_PLAN_1_0.md) · [Sandbox vision](docs/SANDBOX_VISION.md) · [Milestone S1 status](docs/MILESTONE_S1.md) · [G1 + C1](docs/MILESTONE_G1_C1.md) ·
 [Physics engine](docs/PHYSICS_ENGINE.md) · [Data sources](docs/DATA_SOURCES.md) · [Object model](docs/OBJECT_MODEL.md) ·
 [Save format](docs/SAVE_FORMAT.md) · [UI system](docs/UI_SYSTEM.md) · [Gap analysis](docs/GAP_ANALYSIS.md) ·
 [ARCHITECTURE](ARCHITECTURE.md) · [ROADMAP](ROADMAP.md) · [SIMULATION](SIMULATION.md) ·
