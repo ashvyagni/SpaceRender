@@ -336,9 +336,13 @@ pub enum Metric {
     CropChemical,
     HeatCropChemical,
     HeatCropVapor,
+    RadiationExteriorDoseRate,
+    RadiationInteriorDoseRate,
+    RadiationShelterDoseRate,
+    RadiationCumulativeDose,
 }
 impl Metric {
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 56] = [
         Self::Water,
         Self::OxygenReserve,
         Self::Hydrogen,
@@ -391,13 +395,28 @@ impl Metric {
         Self::CropChemical,
         Self::HeatCropChemical,
         Self::HeatCropVapor,
+        Self::RadiationExteriorDoseRate,
+        Self::RadiationInteriorDoseRate,
+        Self::RadiationShelterDoseRate,
+        Self::RadiationCumulativeDose,
     ];
     /// Saved catalog identity is immutable, including existing heat-enabled designs.
     /// New heat/crop metrics are explicit selections, never silently added to aggregate analyses.
     pub fn for_habitat(h: &habitat::Habitat) -> impl Iterator<Item = Self> {
         let used = h.uses_breach();
+        let radiation = h.uses_radiation();
         Self::ALL.into_iter().filter(move |m| {
-            !m.is_heat() && !m.is_crop()
+            if matches!(
+                m,
+                Self::RadiationExteriorDoseRate
+                    | Self::RadiationInteriorDoseRate
+                    | Self::RadiationShelterDoseRate
+                    | Self::RadiationCumulativeDose
+            ) {
+                return radiation;
+            }
+            !m.is_heat()
+                && !m.is_crop()
                 && (used
                     || !matches!(
                         m,
@@ -539,6 +558,10 @@ impl Metric {
             Self::Condensate => "condensate",
             Self::Humidity => "humidity",
             Self::CondensationHeat => "condensation_heat",
+            Self::RadiationExteriorDoseRate => "radiation_exterior_dose_rate",
+            Self::RadiationInteriorDoseRate => "radiation_interior_dose_rate",
+            Self::RadiationShelterDoseRate => "radiation_shelter_dose_rate",
+            Self::RadiationCumulativeDose => "radiation_cumulative_dose",
         }
     }
     pub fn parse(id: &str) -> Result<Self, String> {
@@ -602,6 +625,10 @@ impl Metric {
             Self::Condensate => "Isolated condensate",
             Self::Humidity => "Relative humidity",
             Self::CondensationHeat => "Interval reference condensation heat",
+            Self::RadiationExteriorDoseRate => "Exterior radiation dose rate",
+            Self::RadiationInteriorDoseRate => "Cabin interior dose rate",
+            Self::RadiationShelterDoseRate => "Storm-shelter dose rate",
+            Self::RadiationCumulativeDose => "Cumulative interior dose",
         }
     }
     pub fn unit(self) -> &'static str {
@@ -620,6 +647,10 @@ impl Metric {
             Self::Battery => "kWh",
             Self::DeliveredPower | Self::UnservedPower => "W",
             Self::SabatierHeat | Self::CondensationHeat | Self::BreachCooling => "kJ",
+            Self::RadiationExteriorDoseRate
+            | Self::RadiationInteriorDoseRate
+            | Self::RadiationShelterDoseRate => "mSv/day",
+            Self::RadiationCumulativeDose => "mSv",
             Self::Humidity => "%",
             _ => "kg",
         }
@@ -663,6 +694,22 @@ impl Metric {
                 } else {
                     e.lumped_cooling_j / 1000.0
                 }
+            }
+            Self::RadiationExteriorDoseRate
+            | Self::RadiationInteriorDoseRate
+            | Self::RadiationShelterDoseRate => {
+                let r = b.radiation.as_ref()?;
+                match self {
+                    Self::RadiationExteriorDoseRate => r.exterior_dose_rate_msv_day,
+                    Self::RadiationInteriorDoseRate => r.interior_dose_rate_msv_day,
+                    _ => r.storm_shelter_dose_rate_msv_day,
+                }
+            }
+            Self::RadiationCumulativeDose => {
+                if !h.uses_radiation() {
+                    return None;
+                }
+                h.totals.cumulative_dose_msv
             }
             Self::Water => s.potable_water_kg,
             Self::Vapor => {

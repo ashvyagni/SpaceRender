@@ -11,7 +11,7 @@ and may renumber when a build starts.
 
 ---
 
-## Done — 57 builds
+## Done — 58 builds
 
 | # | Build | Status | Evidence |
 | --- | --- | --- | --- |
@@ -104,7 +104,7 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 | # | Build | Status |
 | --- | --- | --- |
-| 58 | Uncertainty and controlled-comparison framework across research panes | ⬜ |
+| 58 | ~~Uncertainty and controlled-comparison framework across research panes~~ | ✅ **DONE** |
 | 59 | Independent scientific validation campaign (analytic/JPL cross-checks extended) | ⬜ |
 | 60 | Student→researcher UX completeness (guided flows, provenance surfacing) | ⬜ |
 
@@ -158,7 +158,7 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 
 ---
 
-**Totals:** 57 done / ~32 remaining (≈89 builds total; remaining ≈235–335 focused hours, graphics
+**Totals:** 58 done / ~31 remaining (≈89 builds total; remaining ≈230–330 focused hours, graphics
 the dominant wildcard). Cluster sizes in sections B–G are estimates and renumber as builds land;
 section A never renumbers. Update this file in the same commit as each build, and append the new
 gap entry to [MASTER_GAP_ANALYSIS](MASTER_GAP_ANALYSIS.md) when the build is accepted.

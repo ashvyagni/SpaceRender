@@ -310,6 +310,7 @@ mod tests {
                 parameter: Parameter::HeatCapacityJK,
                 values: [5e6, 1e7],
             }),
+            authored_relative_band: None,
         };
         let root =
             std::env::temp_dir().join(format!("cosmogon-heat-curve-design-{}", std::process::id()));

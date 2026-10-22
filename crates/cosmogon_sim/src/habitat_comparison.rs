@@ -105,6 +105,16 @@ pub fn report(
     metric: Metric,
     alignment: Alignment,
 ) -> serde_json::Value {
+    report_with_bands(a, b, metric, alignment, None, None)
+}
+pub fn report_with_bands(
+    a: &Recording,
+    b: &Recording,
+    metric: Metric,
+    alignment: Alignment,
+    a_band: Option<&crate::research::RunBand>,
+    b_band: Option<&crate::research::RunBand>,
+) -> serde_json::Value {
     let rows = pairs(a, b, metric, alignment);
     let ah = &a.rows[0].habitat;
     let bh = &b.rows[0].habitat;
@@ -113,6 +123,23 @@ pub fn report(
         report["heat_trajectory_context"] = crate::habitat_heat_trajectory::context(&[a, b]);
     }
     if metric.has_crop_context() { report["crop_trajectory_context"] = crate::habitat_crop_trajectory::context(&[a,b]); }
+    match (a_band, b_band) {
+        (Some(a_band), Some(b_band)) => {
+            let same_horizon = a.rows.last().is_some_and(|r| r.habitat.budget.seconds > 0.0)
+                && a.rows.last().map(|r| r.habitat.budget.seconds)
+                    == b.rows.last().map(|r| r.habitat.budget.seconds);
+            report["uncertainty"] =
+                crate::research::RunBand::comparison_block(a_band, b_band, same_horizon);
+        }
+        (None, None) => {}
+        _ => {
+            report["uncertainty"] = serde_json::json!({
+                "format": crate::research::FORMAT_COMPARISON,
+                "schema_version": 1,
+                "unavailable": "Only one compared recording carries authored band metadata; interval arithmetic needs both sides",
+            });
+        }
+    }
     report
 }
 pub fn export(
@@ -122,9 +149,23 @@ pub fn export(
     alignment: Alignment,
     path: &std::path::Path,
 ) -> Result<(), String> {
+    export_with_bands(a, b, metric, alignment, None, None, path)
+}
+#[allow(clippy::too_many_arguments)]
+pub fn export_with_bands(
+    a: &Recording,
+    b: &Recording,
+    metric: Metric,
+    alignment: Alignment,
+    a_band: Option<&crate::research::RunBand>,
+    b_band: Option<&crate::research::RunBand>,
+    path: &std::path::Path,
+) -> Result<(), String> {
     use std::io::Write;
-    let report =
-        serde_json::to_vec_pretty(&report(a, b, metric, alignment)).map_err(|e| e.to_string())?;
+    let report = serde_json::to_vec_pretty(&report_with_bands(
+        a, b, metric, alignment, a_band, b_band,
+    ))
+    .map_err(|e| e.to_string())?;
     let rows = pairs(a, b, metric, alignment);
     let mut csv=String::from("a_index,b_index,coordinate_s,a_world_time_s,b_world_time_s,a_value,b_value,b_minus_a,support\n");
     let cell = |v: Option<f64>| v.map(|v| format!("{v:.17e}")).unwrap_or_default();
@@ -236,5 +277,49 @@ mod tests {
         assert!(export(&a, &b, Metric::Water, Alignment::Elapsed, &root).is_err());
         assert_eq!(std::fs::read(root.join("pairs.csv")).unwrap(), before);
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn band_comparison_uses_interval_arithmetic_and_mixed_metadata_stays_unavailable() {
+        use crate::habitat_sweep::Parameter;
+        let a = recording(&[100., 160.], &[10., 9.]);
+        let b = recording(&[100., 160.], &[11., 7.]);
+        let band = |role: crate::research::BandRole, triple: serde_json::Value| {
+            crate::research::RunBand {
+                format: crate::research::FORMAT_RUN_BAND.into(),
+                schema_version: 1,
+                parameter: Parameter::FirmPowerW,
+                relative_band: 0.1,
+                role,
+                value: 1000.0 * role.multiplier(0.1),
+                swept_value: 1000.0,
+                triple_final_metrics: serde_json::from_value(triple).unwrap(),
+            }
+        };
+        let a_band = band(
+            crate::research::BandRole::Central,
+            serde_json::json!({"water":{"unit":"kg","at_low":8.,"at_central":9.,"at_high":10.}}),
+        );
+        let b_band = band(
+            crate::research::BandRole::Central,
+            serde_json::json!({"water":{"unit":"kg","at_low":6.,"at_central":7.,"at_high":8.}}),
+        );
+        let plain = report(&a, &b, Metric::Water, Alignment::World);
+        assert!(plain.get("uncertainty").is_none());
+        let with_bands = report_with_bands(&a, &b, Metric::Water, Alignment::World, Some(&a_band), Some(&b_band));
+        let u = &with_bands["uncertainty"];
+        assert_eq!(u["format"], crate::research::FORMAT_COMPARISON);
+        assert_eq!(u["method"], crate::research::METHOD_INTERVAL_ARITHMETIC);
+        assert_eq!(u["a_role"], "central");
+        assert_eq!(u["same_horizon"], true);
+        let m = &u["metrics"]["water"];
+        assert_eq!(m["central_b_minus_a"], -2.0);
+        assert_eq!(m["at_low"], 6.0 - 10.0);
+        assert_eq!(m["at_high"], 8.0 - 8.0);
+        let one = report_with_bands(&a, &b, Metric::Water, Alignment::World, Some(&a_band), None);
+        assert!(one["uncertainty"]["unavailable"].is_string());
+        // Tampered band metadata is refused by its own validation path.
+        let mut bad = a_band.clone();
+        bad.value = 5.0;
+        assert!(bad.validate().is_err());
     }
 }

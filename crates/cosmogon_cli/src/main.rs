@@ -74,6 +74,7 @@ struct Args {
     sweep_start: Option<f64>,
     sweep_end: Option<f64>,
     sweep_runs: usize,
+    band: Option<f64>,
     measure_target: Option<String>,
     measure: Option<String>,
     seed: u64,
@@ -150,6 +151,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         sweep_start: None,
         sweep_end: None,
         sweep_runs: 5,
+        band: None,
         measure_target: None,
         measure: None,
         seed: 1,
@@ -231,7 +233,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
         if a.cmd=="habitat-inspect" && !matches!(flag.as_str(),"--recording"|"--observation"|"--output") {return Err(format!("{flag} is not a habitat inspection option"));}
         if a.cmd=="habitat" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat study option"));}
         if matches!(a.cmd.as_str(),"habitat-definition"|"habitat-crop-definition"|"habitat-setup") && !matches!(flag.as_str(),"--initial"|"--output"|"--target"|"--latitude"|"--longitude"|"--seed"|"--scenario") {return Err(format!("{flag} is not a habitat-definition option"));}
-        if a.cmd=="habitat-sweep" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--parameter"|"--from"|"--to"|"--runs") {return Err(format!("{flag} is not a habitat sweep option"));}
+        if a.cmd=="habitat-sweep" && !matches!(flag.as_str(),"--definition"|"--habitat-id"|"--initial"|"--output"|"--samples"|"--interval-days"|"--parameter"|"--from"|"--to"|"--runs"|"--band") {return Err(format!("{flag} is not a habitat sweep option"));}
         if a.cmd=="habitat-compare" && !matches!(flag.as_str(),"--recording"|"--reference"|"--measure"|"--alignment"|"--output") {return Err(format!("{flag} is not a habitat comparison option"));}
         if matches!(flag.as_str(),"--parameter"|"--from"|"--to"|"--runs"|"--samples"|"--interval-days") {explicit_sweep=true;}
         match flag.as_str() {
@@ -354,6 +356,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--from" => a.sweep_start = Some(number(val()?, &flag)?),
             "--to" => a.sweep_end = Some(number(val()?, &flag)?),
             "--runs" => a.sweep_runs = number(val()?, &flag)?,
+            "--band" => {if a.cmd!="habitat-sweep" {return Err("--band requires habitat-sweep".into());}a.band=Some(number(val()?, &flag)?);},
             "--measure-target" => a.measure_target = Some(val()?),
             "--measure" => a.measure = Some(val()?),
             "--seed" => {a.seed = number(val()?, &flag)?;explicit_seed=true;},
@@ -499,7 +502,7 @@ fn help() {
     eprintln!("cosmogon-cli habitat-rerun --recording COMPLETE_DESIGN --output NEW_DIR [--definition NEW_TYPED_PLAN]   # exact original common starting world");
     eprintln!("cosmogon-cli habitat-balance --recording FOLDER [--from-index N] [--observation N] [--output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-figure --recording FOLDER --definition GRAPH_LAYOUT --output NEW_DIR [--reference ORDINARY_B]");
-    eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
+    eprintln!("cosmogon-cli habitat-sweep --initial SAVE --output NEW_DIR --parameter firm_power_w --from 0 --to 4000 --runs 3 [--band 0.1] [--samples 25 --interval-days 0.041666666666666664]\n  or --definition SWEEP_PLAN; optional --habitat-id ID\ncosmogon-cli habitat-compare --recording A --reference B [--measure water --alignment elapsed|world --output NEW_DIR]");
     eprintln!("cosmogon-cli habitat-diagnose --initial SAVE --habitat-id ID [--output NEW_DIR]   # explain completed power/water/heat");
     eprintln!("cosmogon-cli habitat-crop-install --initial SAVE --habitat-id ID --definition CROP_CONFIG --nutrient-kg KG --output NEW_DIR   # explicit runtime greenhouse installation granting only its nutrient charge\ncosmogon-cli habitat-crop-store --initial SAVE --habitat-id ID [--store-kg KG] --output NEW_DIR   # bounded 1:1 conversion of harvested edible dry material into the habitat dry-food tank\ncosmogon-cli habitat-construction-supply --initial SAVE --habitat-id ID --material-kg KG --output NEW_DIR   # explicit bounded supply of processed construction material\ncosmogon-cli habitat-stock-transfer --initial SAVE --from-id ID --to-id ID [--oxygen-kg KG --water-kg KG --food-dry-kg KG --food-water-kg KG] --output NEW_DIR   # conserved same-body transfer of finite habitat supply stocks");
     eprintln!("cosmogon-cli habitat-verify --recording COMPLETE_PAIRED_FOLDER [--output NEW_REPORT_DIR]   # recompute every actual row and endpoint");
@@ -1179,7 +1182,9 @@ fn habitat_diagnose(a:&Args)->Result<(),String> {
 
 fn habitat_sweep_plan(a:&Args)->Result<cosmogon_sim::habitat_sweep::Plan,String> {
     use cosmogon_sim::habitat_sweep::{Parameter,Plan};
-    if let Some(p)=&a.definition {Plan::read(std::path::Path::new(p))} else {Plan::linear(Parameter::parse(&a.parameter)?,a.sweep_start.ok_or("Sweep requires --from")?,a.sweep_end.ok_or("Sweep requires --to")?,a.sweep_runs,a.samples,a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY)}
+    let mut plan=if let Some(p)=&a.definition {Plan::read(std::path::Path::new(p))?} else {Plan::linear(Parameter::parse(&a.parameter)?,a.sweep_start.ok_or("Sweep requires --from")?,a.sweep_end.ok_or("Sweep requires --to")?,a.sweep_runs,a.samples,a.interval_days*cosmogon_sim::time::SECONDS_PER_DAY)?};
+    if let Some(b)=a.band {plan.authored_relative_band=Some(b);plan.validate()?;}
+    Ok(plan)
 }
 fn habitat_sweep(a:&Args)->Result<(),String> {
     let plan=habitat_sweep_plan(a)?;let base=save::read_file(std::path::Path::new(a.initial.as_deref().expect("validated initial"))).map_err(|e|e.to_string())?;
@@ -1232,10 +1237,12 @@ fn habitat_inspect(a:&Args)->Result<serde_json::Value,String> {
 
 fn habitat_compare(a:&Args)->Result<(),String> {
     use cosmogon_sim::{habitat_comparison as comparison,habitat_recording::{Metric,Recording}};
-    let left=Recording::read(std::path::Path::new(a.recording.as_deref().expect("validated A")))?;let right=Recording::read(std::path::Path::new(a.reference.as_deref().expect("validated B")))?;
+    let left_path=std::path::Path::new(a.recording.as_deref().expect("validated A"));let right_path=std::path::Path::new(a.reference.as_deref().expect("validated B"));
+    let left=Recording::read(left_path)?;let right=Recording::read(right_path)?;
+    let left_band=cosmogon_sim::research::RunBand::read_optional(left_path)?;let right_band=cosmogon_sim::research::RunBand::read_optional(right_path)?;
     let metric=Metric::parse(a.measure.as_deref().unwrap_or("water"))?;let alignment=comparison::Alignment::parse(&a.alignment)?;
-    if let Some(path)=&a.output {comparison::export(&left,&right,metric,alignment,std::path::Path::new(path))?;}
-    println!("{}",serde_json::to_string_pretty(&comparison::report(&left,&right,metric,alignment)).map_err(|e|e.to_string())?);Ok(())
+    if let Some(path)=&a.output {comparison::export_with_bands(&left,&right,metric,alignment,left_band.as_ref(),right_band.as_ref(),std::path::Path::new(path))?;}
+    println!("{}",serde_json::to_string_pretty(&comparison::report_with_bands(&left,&right,metric,alignment,left_band.as_ref(),right_band.as_ref())).map_err(|e|e.to_string())?);Ok(())
 }
 
 fn habitat(a:&Args)->Result<(),String> {

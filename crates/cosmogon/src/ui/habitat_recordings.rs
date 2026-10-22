@@ -70,6 +70,7 @@ struct SweepForm {
     paired: bool,
     secondary_parameter: Parameter,
     secondary_values: String,
+    band: String,
 }
 impl Default for SweepForm {
     fn default() -> Self {
@@ -82,6 +83,7 @@ impl Default for SweepForm {
             paired: false,
             secondary_parameter: Parameter::WaterRecoveryFraction,
             secondary_values: "0.8, 0.95".into(),
+            band: String::new(),
         }
     }
 }
@@ -96,6 +98,8 @@ pub struct Study {
     pub rerun_output: Option<String>,
     pub recording: Option<Recording>,
     pub comparison: Option<Recording>,
+    loaded_band: Option<cosmogon_sim::research::RunBand>,
+    comparison_band: Option<cosmogon_sim::research::RunBand>,
     pub experiment_mode: bool,
     pub keep_experiment_at_launch: bool,
     pub factorial_mode: bool,
@@ -291,9 +295,13 @@ impl Study {
         let curve=result.paired.as_ref().map(|d|d.curve(self.metric)).transpose()?;
         let path = format!("{}/run-{:03}", result.path,branches[0]);
         let comparison_path = format!("{}/run-{:03}", result.path, branches[1]);
+        let loaded_band = cosmogon_sim::research::RunBand::read_optional(std::path::Path::new(&path))?;
+        let comparison_band = cosmogon_sim::research::RunBand::read_optional(std::path::Path::new(&comparison_path))?;
         self.loaded_path=path.clone();
         self.path = path;
         self.comparison_path = comparison_path;
+        self.loaded_band = loaded_band;
+        self.comparison_band = comparison_band;
         self.experiment_mode = self.keep_experiment_at_launch;
         self.keep_experiment_at_launch = false;
         if let Ok(plan) = serde_json::from_value::<Plan>(result.manifest["plan"].clone()) {
@@ -302,6 +310,7 @@ impl Study {
             self.sweep.samples = plan.samples;
             self.sweep.interval_hours = plan.interval_s / 3600.0;
             self.sweep.paired = plan.secondary.is_some();
+            self.sweep.band = plan.authored_relative_band.map(|b| b.to_string()).unwrap_or_default();
             if let Some(b) = plan.secondary {
                 self.sweep.secondary_parameter = b.parameter;
                 self.sweep.secondary_values = b.values.iter().map(|v|v.to_string()).collect::<Vec<_>>().join(", ");
@@ -343,6 +352,7 @@ impl Study {
         self.factorial_mode = false;
         self.recording = Some(r);
         self.loaded_path=path.clone();
+        self.loaded_band = cosmogon_sim::research::RunBand::read_optional(std::path::Path::new(&path))?;
         self.path = path;
         self.selected = selected;
         self.status = Some("Recorded observations reopened. The live world is unchanged.".into());
@@ -379,15 +389,23 @@ impl Study {
         {
             self.comparison_task = None;
             match result {
-                Ok(r) => {
-                    self.balance.reset();
-                    self.sweep_manifest = None;
-                    self.paired=None;self.single=None;self.origin=None;self.origin_validation=None;self.use_saved_origin=false;self.sweep_request=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
-                    self.factorial_mode = false;
-                    self.comparison = Some(r);
-                    self.comparison_path = self.pending_comparison_path.clone();
-                    self.status=Some("Comparison observations reopened. Exact stored-time alignment; no live-world change.".into());
-                }
+                Ok(r) => match cosmogon_sim::research::RunBand::read_optional(std::path::Path::new(&self.pending_comparison_path)) {
+                    Ok(band) => {
+                        self.comparison_band = band;
+                        self.balance.reset();
+                        self.sweep_manifest = None;
+                        self.paired=None;self.single=None;self.origin=None;self.origin_validation=None;self.use_saved_origin=false;self.sweep_request=None;self.single_source.clear();self.paired_curve=None;self.replay.reset();
+                        self.factorial_mode = false;
+                        self.comparison = Some(r);
+                        self.comparison_path = self.pending_comparison_path.clone();
+                        self.status=Some("Comparison observations reopened. Exact stored-time alignment; no live-world change.".into());
+                    }
+                    Err(e) => {
+                        self.status = Some(format!(
+                            "Could not open comparison band metadata: {e}. Previous comparison is preserved."
+                        ));
+                    }
+                },
                 Err(e) => {
                     self.status = Some(format!(
                         "Could not open comparison: {e}. Previous comparison is preserved."
@@ -433,9 +451,15 @@ impl Study {
         let d=self.single.as_ref().ok_or("Open a single-setting design first")?;
         let (a,b)=d.selected(branches[0],branches[1])?;
         let (a,b)=(a.clone(),b.clone());
-        self.loaded_path=format!("{}/run-{:03}",self.single_source,branches[0]);
-        self.path=self.loaded_path.clone();
-        self.comparison_path=format!("{}/run-{:03}",self.single_source,branches[1]);
+        let loaded_path=format!("{}/run-{:03}",self.single_source,branches[0]);
+        let comparison_path=format!("{}/run-{:03}",self.single_source,branches[1]);
+        let loaded_band=cosmogon_sim::research::RunBand::read_optional(std::path::Path::new(&loaded_path))?;
+        let comparison_band=cosmogon_sim::research::RunBand::read_optional(std::path::Path::new(&comparison_path))?;
+        self.loaded_path=loaded_path.clone();
+        self.path=loaded_path;
+        self.comparison_path=comparison_path;
+        self.loaded_band=loaded_band;
+        self.comparison_band=comparison_band;
         self.recording=Some(a);self.comparison=Some(b);self.branches=branches;
         self.balance.reset();
         Ok(())
@@ -443,7 +467,7 @@ impl Study {
     pub fn metadata(&self) -> Option<serde_json::Value> {
         let r = self.recording.as_ref()?;
         let row = &r.rows[self.selected.min(r.rows.len() - 1)];
-        let mut metadata = serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report(r,b,self.metric,self.alignment)})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"balance":self.balance_mode.then(||self.balance.metadata()),"paired_results_visible":self.factorial_mode && !self.pressure_mode && !self.figure_mode && !self.balance_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"figure":self.figure_mode.then(||serde_json::json!({"graph":self.graph_metadata(),"export":self.figure.metadata(),"paired_contrast":self.factorial_mode})),"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"});
+        let mut metadata = serde_json::json!({"summary":r.summary,"metric":self.metric.id(),"unit":self.metric.unit(),"selected_observation":self.selected,"selected_row":row,"why":self.why_mode.then(||self.why.metadata(&row.habitat,row.simulation_time_s,"recorded_completed_interval")),"selected_value":self.metric.value(row),"comparison":self.comparison.as_ref().map(|b| {let pairs=habitat_comparison::pairs(r,b,self.metric,self.alignment);let pair=&pairs[self.selected.min(pairs.len()-1)];serde_json::json!({"summary":b.summary,"alignment":self.alignment,"selected_pair":pair,"selected_row":pair.b_index.map(|j|&b.rows[j]),"report":habitat_comparison::report_with_bands(r,b,self.metric,self.alignment,self.loaded_band.as_ref(),self.comparison_band.as_ref())})}),"sweep":self.sweep_manifest,"staged_geometry_thermal_plan":(self.experiment_mode && (self.sweep.parameter.geometry_or_thermal() || self.sweep.paired && self.sweep.secondary_parameter.geometry_or_thermal())).then(||serde_json::json!({"parameter":self.sweep.parameter.id(),"values_text":self.sweep.values,"paired":self.sweep.paired,"secondary_parameter":self.sweep.secondary_parameter.id(),"secondary_values_text":self.sweep.secondary_values,"samples":self.sweep.samples,"interval_hours":self.sweep.interval_hours,"new_output":self.sweep.output,"scope":"Editable staged inputs for a new experiment; completed recording inputs remain separate"})),"pressure":self.pressure_mode.then(||self.pressure.metadata(r,self.selected,&self.loaded_path)),"balance":self.balance_mode.then(||self.balance.metadata()),"paired_results_visible":self.factorial_mode && !self.pressure_mode && !self.figure_mode && !self.balance_mode,"graph_view":self.graph_metadata(),"graph_layout_visible":self.graph_mode,"figure":self.figure_mode.then(||serde_json::json!({"graph":self.graph_metadata(),"export":self.figure.metadata(),"paired_contrast":self.factorial_mode})),"replay":self.replay.metadata(),"paired_source":self.paired.as_ref().map(|_|&self.paired_source),"paired_selected_analysis":self.paired.as_ref().and_then(|d|d.report_at(self.selected).ok()),"paired_curve":self.paired_curve.as_ref().filter(|(m,_)|*m==self.metric).map(|(_,points)|serde_json::json!({"metric":self.metric.id(),"effect":self.effect.id(),"point_count":points.len(),"available_count":points.iter().filter(|p|self.effect.value(&p.contrasts).is_some()).count(),"selected_point":points.get(self.selected),"pane":self.paired_pane})),"scope":"Independent recorded view at capture request, possibly hidden; no live-world or camera change"});
         if self.metric.is_heat() {
             let recordings = if self.factorial_mode { self.paired.as_ref().map(|d| d.recordings.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![r]) } else { std::iter::once(r).chain(self.comparison.as_ref()).collect() };
             metadata["heat_trajectory_context"] = cosmogon_sim::habitat_heat_trajectory::context(&recordings);
@@ -731,11 +755,16 @@ pub fn panel(
             egui::CollapsingHeader::new("Compare original conditions and export differences").show(
                 ui,
                 |ui| {
-                    let report = habitat_comparison::report(r, b, study.metric, study.alignment);
+                    let report = habitat_comparison::report_with_bands(r, b, study.metric, study.alignment, study.loaded_band.as_ref(), study.comparison_band.as_ref());
                     ui.label(format!(
                         "Initial conditions differ: {} · source versions differ: {}",
                         report["initial_conditions_differ"], report["source_versions_differ"]
                     ));
+                    if let Some(unavailable) = report["uncertainty"]["unavailable"].as_str() {
+                        ui.colored_label(ACCENT, format!("Band envelope unavailable: {unavailable}"));
+                    } else if report["uncertainty"].is_object() {
+                        ui.label("Authored input-band interval arithmetic is included in the comparison JSON below.");
+                    }
                     ui.label(report["limits"].as_str().unwrap_or_default());
                     ui.label(format!("A: {} · B: {}", study.path, study.comparison_path));
                     if ui.button("Copy complete comparison JSON").clicked() {
@@ -746,11 +775,13 @@ pub fn panel(
                     ui.text_edit_singleline(&mut study.comparison_output);
                     if ui.button("Export actual comparison JSON and CSV").clicked() {
                         study.status = Some(
-                            match habitat_comparison::export(
+                            match habitat_comparison::export_with_bands(
                                 r,
                                 b,
                                 study.metric,
                                 study.alignment,
+                                study.loaded_band.as_ref(),
+                                study.comparison_band.as_ref(),
                                 std::path::Path::new(&study.comparison_output),
                             ) {
                                 Ok(()) => {
@@ -829,10 +860,45 @@ pub fn panel(
             .clicked()
         {
             study.comparison = None;
+            study.comparison_band = None;
             study.sweep_manifest = None;
             study.paired=None;study.paired_curve=None;study.replay.reset();study.factorial_mode=false;
         }
     });
+    let band_block = match (&study.loaded_band, &study.comparison_band) {
+        (Some(a_band), Some(b_band)) => {
+            let same_horizon = study.recording.as_ref().zip(study.comparison.as_ref()).is_some_and(|(a, b)| {
+                a.rows.last().is_some_and(|r| r.habitat.budget.seconds > 0.0)
+                    && a.rows.last().map(|r| r.habitat.budget.seconds)
+                        == b.rows.last().map(|r| r.habitat.budget.seconds)
+            });
+            Some(cosmogon_sim::research::RunBand::comparison_block(a_band, b_band, same_horizon))
+        }
+        _ => None,
+    };
+    if let Some(block) = &band_block {
+        ui.separator();
+        ui.label("Authored input-band envelope (per-run final observations)");
+        if let Some(metric_block) = block["metrics"].get(study.metric.id()) {
+            if metric_block["unavailable"].is_string() {
+                ui.colored_label(ACCENT, metric_block["unavailable"].as_str().expect("string"));
+            } else {
+                ui.label(format!(
+                    "{} · B−A central {:.6e} · interval [{:.6e}, {:.6e}]",
+                    study.metric.unit(),
+                    metric_block["central_b_minus_a"].as_f64().unwrap_or(f64::NAN),
+                    metric_block["at_low"].as_f64().unwrap_or(f64::NAN),
+                    metric_block["at_high"].as_f64().unwrap_or(f64::NAN),
+                ));
+            }
+        } else {
+            ui.colored_label(ACCENT, "No band triple for the selected metric.");
+        }
+        ui.label(egui::RichText::new(block["assumption"].as_str().unwrap_or_default()).small().color(MUTED));
+    } else if study.loaded_band.is_some() || study.comparison_band.is_some() {
+        ui.separator();
+        ui.colored_label(ACCENT, "Only one side carries authored band metadata; interval arithmetic needs both.");
+    }
     if let Some(status) = &study.status {
         ui.colored_label(ACCENT, status);
     }
@@ -974,6 +1040,10 @@ fn experiment(
         study.sweep.parameter.unit()
     ));
     ui.text_edit_singleline(&mut study.sweep.values);
+    ui.horizontal(|ui| {
+        ui.label("Authored input band (± fraction, 0 = off)");
+        ui.text_edit_singleline(&mut study.sweep.band);
+    });
     if let Some(h)=if study.use_saved_origin && study.origin.is_some() {study.origin.as_ref().map(|o|&o.habitat)}else{habitat_id.and_then(|id|world.habitats.iter().find(|h|h.id==id))} {
         example_levels(ui,study.sweep.parameter,h,&mut study.sweep.values);
     }
@@ -1013,6 +1083,18 @@ fn experiment(
         })
         .collect::<Result<Vec<_>, _>>();
     let plan = values.and_then(|values| {
+        let band = if study.sweep.band.trim().is_empty() || study.sweep.band.trim() == "0" {
+            None
+        } else {
+            Some(
+                study
+                    .sweep
+                    .band
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| "Authored band must be a finite number".to_string())?,
+            )
+        };
         let p = Plan {
             format: "cosmogon-habitat-sweep-plan".into(),
             schema_version: if study.sweep.paired {2} else {1},
@@ -1024,6 +1106,7 @@ fn experiment(
                 let levels=parse_levels(&study.sweep.secondary_values)?;
                 Some(cosmogon_sim::habitat_factorial::Secondary {parameter:study.sweep.secondary_parameter,values:levels.try_into().map_err(|_|"Second setting needs exactly two levels")?})
             } else {None},
+            authored_relative_band: band,
         };
         p.validate()?;
         Ok(p)

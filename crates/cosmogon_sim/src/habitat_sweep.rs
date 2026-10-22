@@ -29,9 +29,10 @@ pub enum Parameter {
     BreachAreaM2,BreachDischarge,BreachOutsidePressurePa,BreachGamma,
     VolumeM3, HeatCapacityJK, ConductanceWK, RadiatorAreaM2,
     CropMaintainedConditions, CropAuxiliaryPowerW, CropDryCapacityKg, CropOxygenCapacityKg,
+    RadiationWallTransmission, RadiationStormShelterTransmission,
 }
 impl Parameter {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 29] = [
         Self::FirmPowerW,
         Self::SolarAreaM2,
         Self::BatteryCapacityJ,
@@ -49,6 +50,7 @@ impl Parameter {
         Self::MoistureCondensateCapacityKg,Self::BreachAreaM2,Self::BreachDischarge,Self::BreachOutsidePressurePa,Self::BreachGamma,
         Self::VolumeM3, Self::HeatCapacityJK, Self::ConductanceWK, Self::RadiatorAreaM2,
         Self::CropMaintainedConditions, Self::CropAuxiliaryPowerW, Self::CropDryCapacityKg, Self::CropOxygenCapacityKg,
+        Self::RadiationWallTransmission, Self::RadiationStormShelterTransmission,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -74,6 +76,8 @@ impl Parameter {
             Self::MoistureRateKgS => "moisture_rate_kg_s",
             Self::MoistureElectricityJKg => "moisture_electricity_j_kg",
             Self::MoistureCondensateCapacityKg => "moisture_condensate_capacity_kg",
+            Self::RadiationWallTransmission => "radiation_wall_transmission",
+            Self::RadiationStormShelterTransmission => "radiation_storm_shelter_transmission",
         }
     }
     pub fn parse(s: &str) -> Result<Self, String> {
@@ -110,6 +114,8 @@ impl Parameter {
             Self::MoistureCondensateCapacityKg => {
                 "Isolated condensate capacity (fixed initial mass)"
             }
+            Self::RadiationWallTransmission => "Assumed cabin wall transmission fraction",
+            Self::RadiationStormShelterTransmission => "Assumed storm-shelter transmission fraction",
         }
     }
     pub fn unit(self) -> &'static str {
@@ -132,6 +138,7 @@ impl Parameter {
             Self::ElectrolysisRateKgS | Self::SabatierRateKgS | Self::MoistureRateKgS => "kg/s",
             Self::MoistureElectricityJKg => "J/kg",
             Self::MoistureCondensateCapacityKg => "kg",
+            Self::RadiationWallTransmission | Self::RadiationStormShelterTransmission => "fraction",
         }
     }
     pub fn crop(self) -> bool {
@@ -150,6 +157,8 @@ impl Parameter {
             Self::HeatCapacityJK => Some("Same initial temperature, different effective heat capacity. Initial implied sensible energy is not held equal; capacity is an assumption, not measured material data."),
             Self::ConductanceWK => Some("Total envelope conductance in W/K, not material conductivity or insulation thickness. No automatic geometry or equipment scaling."),
             Self::RadiatorAreaM2 => Some("Radiating area changes at fixed emissivity, pump limit and initial stores. Actual removal is also limited by available power and thermostat demand."),
+            Self::RadiationWallTransmission => Some("Authored fraction of the exterior dose rate transmitted through the cabin walls; an engineering assumption, not measured material attenuation or dosimetry."),
+            Self::RadiationStormShelterTransmission => Some("Authored further transmission fraction inside the storm shelter; an engineering assumption, not a measured shelter geometry or medical shield design."),
             _ => None,
         }
     }
@@ -270,6 +279,18 @@ impl Parameter {
                     .ok_or("Enable finite cabin moisture before sweeping its assumptions")?
                     .condensate_capacity_kg = value
             }
+            Self::RadiationWallTransmission => {
+                c.radiation
+                    .as_mut()
+                    .ok_or("Enable cabin radiation shielding before sweeping its assumptions")?
+                    .wall_transmission = value
+            }
+            Self::RadiationStormShelterTransmission => {
+                c.radiation
+                    .as_mut()
+                    .ok_or("Enable cabin radiation shielding before sweeping its assumptions")?
+                    .storm_shelter_transmission = value
+            }
         }
         c.validate()
     }
@@ -285,6 +306,9 @@ pub struct Plan {
     pub interval_s: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secondary: Option<crate::habitat_factorial::Secondary>,
+    /// Authored ±relative input band executed as low/central/high triples per value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_relative_band: Option<f64>,
 }
 impl Plan {
     pub fn linear(
@@ -315,6 +339,7 @@ impl Plan {
             samples,
             interval_s,
             secondary: None,
+            authored_relative_band: None,
         };
         plan.validate()?;
         Ok(plan)
@@ -369,7 +394,14 @@ impl Plan {
         report
     }
     pub fn branch_count(&self) -> usize {
-        self.values.len() * if self.secondary.is_some() { 2 } else { 1 }
+        let values = self.values.len();
+        if self.secondary.is_some() {
+            values * 2
+        } else if self.authored_relative_band.is_some() {
+            values * 3
+        } else {
+            values
+        }
     }
     pub fn validate(&self) -> Result<(), String> {
         let version = if self.secondary.is_some() { 2 } else { 1 };
@@ -408,6 +440,15 @@ impl Plan {
                 return Err("Paired studies require two distinct settings, each with exactly two finite distinct levels".into());
             }
         }
+        if let Some(band) = self.authored_relative_band {
+            crate::research::validate_relative_band(band)?;
+            if self.secondary.is_some() {
+                return Err("Authored input bands are not supported for paired (two-setting) studies".into());
+            }
+            if self.values.contains(&0.0) {
+                return Err("Authored bands require nonzero swept values so low/central/high branches stay distinct".into());
+            }
+        }
         if !self.interval_s.is_finite()
             || !(1.0..=30.0 * crate::time::SECONDS_PER_DAY).contains(&self.interval_s)
             || self.interval_s * (self.samples - 1) as f64 > 30.0 * crate::time::SECONDS_PER_DAY
@@ -440,6 +481,19 @@ impl Plan {
     pub fn validate_world(&self, base: &Universe, id: u64) -> Result<(), String> {
         self.configurations(base, id).map(|_| ())
     }
+    /// Applied primary value and band role for one branch index.
+    pub(crate) fn branch_inputs(&self, i: usize) -> (f64, Option<crate::research::BandRole>) {
+        if let Some(band) = self.authored_relative_band {
+            let role = match i % 3 {
+                0 => crate::research::BandRole::Low,
+                1 => crate::research::BandRole::Central,
+                _ => crate::research::BandRole::High,
+            };
+            (self.values[i / 3] * role.multiplier(band), Some(role))
+        } else {
+            (self.values[i % self.values.len()], None)
+        }
+    }
     pub(crate) fn configurations(
         &self,
         base: &Universe,
@@ -462,7 +516,7 @@ impl Plan {
         }
         (0..self.branch_count())
             .map(|i| {
-                let value = self.values[i % self.values.len()];
+                let (value, _role) = self.branch_inputs(i);
                 let mut c = h.config.clone();
                 self.parameter.set(&mut c, value)?;
                 if let Some(b) = &self.secondary {
@@ -517,6 +571,9 @@ pub fn execute(
         .system;
     let mut runs = Vec::new();
     let mut paired_recordings = Vec::new();
+    let band = plan.authored_relative_band;
+    let mut band_triples: Vec<[Option<serde_json::Map<String, serde_json::Value>>; 3]> =
+        if band.is_some() { (0..plan.values.len()).map(|_| [None, None, None]).collect() } else { Vec::new() };
     for (i, config) in configs.into_iter().enumerate() {
         let mut world = base.clone();
         world.apply_edit(Edit::ConfigureHabitat {
@@ -541,12 +598,76 @@ pub fn execute(
                 )
             })
             .collect::<serde_json::Map<String, serde_json::Value>>();
-        let mut run = serde_json::json!({"index":i,"value":plan.values[i%plan.values.len()],"folder":folder,"recording":recording.summary,"final_metrics":final_values});
+        let (applied_value, role) = plan.branch_inputs(i);
+        let mut run = serde_json::json!({"index":i,"value":applied_value,"folder":folder,"recording":recording.summary,"final_metrics":final_values});
         if let Some(b) = &plan.secondary {
             run["secondary_value"] = serde_json::json!(b.values[i / 2]);
             paired_recordings.push(recording);
         }
+        if let Some(role) = role {
+            let swept = plan.values[i / 3];
+            run["band_role"] = serde_json::json!(role.id());
+            run["swept_value"] = serde_json::json!(swept);
+            let mut triple = serde_json::Map::new();
+            for (id, entry) in &final_values {
+                triple.insert(
+                    id.clone(),
+                    serde_json::json!({
+                        "unit": entry["unit"].clone(),
+                        "value": entry["value"].clone(),
+                    }),
+                );
+            }
+            band_triples[i / 3][i % 3] = Some(triple);
+        }
         runs.push(run);
+    }
+    if let (Some(band), Some(parameter)) = (band, band.is_some().then_some(plan.parameter)) {
+        for (value_index, triple) in band_triples.iter().enumerate() {
+            let swept = plan.values[value_index];
+            let mut merged: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+            for (role_index, metrics) in triple.iter().enumerate() {
+                let Some(metrics) = metrics else {
+                    return Err("Incomplete authored band triple".into());
+                };
+                let key = match role_index {
+                    0 => "at_low",
+                    1 => "at_central",
+                    _ => "at_high",
+                };
+                for (id, entry) in metrics {
+                    let slot = merged.entry(id.clone()).or_insert_with(|| {
+                        serde_json::json!({"unit":entry["unit"].clone(),"at_low":serde_json::Value::Null,"at_central":serde_json::Value::Null,"at_high":serde_json::Value::Null})
+                    });
+                    slot[key] = entry["value"].clone();
+                }
+            }
+            for (role_index, metrics) in triple.iter().enumerate() {
+                if metrics.is_none() {
+                    return Err("Incomplete authored band triple".into());
+                }
+                let folder = format!("run-{:03}", value_index * 3 + role_index);
+                let role = match role_index {
+                    0 => crate::research::BandRole::Low,
+                    1 => crate::research::BandRole::Central,
+                    _ => crate::research::BandRole::High,
+                };
+                let band_file = crate::research::RunBand {
+                    format: crate::research::FORMAT_RUN_BAND.into(),
+                    schema_version: 1,
+                    parameter,
+                    relative_band: band,
+                    role,
+                    value: swept * role.multiplier(band),
+                    swept_value: swept,
+                    triple_final_metrics: merged.clone(),
+                };
+                write(
+                    &format!("{folder}/band.json"),
+                    &serde_json::to_vec_pretty(&band_file).map_err(|e| e.to_string())?,
+                )?;
+            }
+        }
     }
     let mut manifest = serde_json::json!({"format":"cosmogon-habitat-sweep","schema_version":1,"complete":true,"habitat_id":id,"common_state_fingerprint":crate::research::state_fingerprint(base)?,"common_data_versions":crate::save::data_versions(base),"parameter":plan.parameter.id(),"unit":plan.parameter.unit(),"plan":plan,"runs":runs,"mechanism":"Independent clones of one common state; one ordinary configuration edit at the common time; old-configuration remainders complete before the change. Initial stocks are preserved.","limits":"Model sensitivity under assumed equipment and environment, not confidence intervals, optimization proof, causal inference about field hardware or field calibration. Completion manifest is written last; folders lacking it are incomplete."});
     if plan.secondary.is_some() {
@@ -558,6 +679,58 @@ pub fn execute(
         manifest["schema_version"] = 2.into();
         manifest["factorial_analysis"] = analysis;
         manifest["mechanism"]="Four independent common-state clones; both settings changed in one atomic ordinary edit. Standard order A0B0, A1B0, A0B1, A1B1. Initial stocks and old-configuration remainders preserved.".into();
+    }
+    if let (Some(band), Some(parameter)) = (band, band.is_some().then_some(plan.parameter)) {
+        let unit = plan.parameter.unit();
+        let mut metric_ids: std::collections::BTreeSet<String> = Default::default();
+        for triple in &band_triples {
+            for metrics in triple.iter().flatten() {
+                metric_ids.extend(metrics.keys().cloned());
+            }
+        }
+        let mut entries = Vec::new();
+        for (value_index, triple) in band_triples.iter().enumerate() {
+            let swept = plan.values[value_index];
+            let mut metrics = serde_json::Map::new();
+            for id in &metric_ids {
+                // Values are per-role: slot order is low, central, high.
+                let role_value = |role_index: usize| -> Option<f64> {
+                    triple[role_index]
+                        .as_ref()?
+                        .get(id)?
+                        .get("value")
+                        .and_then(|v| v.as_f64())
+                };
+                let (Some(at_low), Some(at_central), Some(at_high)) =
+                    (role_value(0), role_value(1), role_value(2))
+                else {
+                    metrics.insert(
+                        id.clone(),
+                        serde_json::json!({"unit":serde_json::Value::Null,"at_low":serde_json::Value::Null,"at_central":serde_json::Value::Null,"at_high":serde_json::Value::Null,"unavailable":"Triple final value incomplete"}),
+                    );
+                    continue;
+                };
+                metrics.insert(
+                    id.clone(),
+                    serde_json::json!({
+                        "unit": triple[1].as_ref().and_then(|m| m.get(id).and_then(|e| e.get("unit").cloned())).unwrap_or(serde_json::Value::Null),
+                        "at_low": at_low,
+                        "at_central": at_central,
+                        "at_high": at_high,
+                        "min": at_low.min(at_central).min(at_high),
+                        "max": at_low.max(at_central).max(at_high),
+                    }),
+                );
+            }
+            entries.push(serde_json::json!({
+                "value": swept,
+                "low_value": swept * (1.0 - band),
+                "high_value": swept * (1.0 + band),
+                "runs": {"low": value_index * 3, "central": value_index * 3 + 1, "high": value_index * 3 + 2},
+                "metrics": metrics,
+            }));
+        }
+        manifest["uncertainty"] = crate::research::manifest_block(parameter, unit, band, entries);
     }
     manifest = plan.with_assumptions(manifest);
     write(
@@ -993,5 +1166,145 @@ mod tests {
         assert!(execute(&disabled,0,&p,&root).is_err());assert!(execute(&world(),0,&p,&root).is_err());assert!(!root.exists());
         assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);
     }
-
+    #[test]
+    fn authored_band_executes_low_central_high_triples_with_manifest_and_run_metadata() {
+        let u=moisture_world();
+        let before=crate::research::state_fingerprint(&u).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-sweep-band-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        let mut p=Plan::linear(Parameter::MoistureAirborneFraction,0.2,0.6,2,3,3600.).unwrap();
+        p.authored_relative_band=Some(0.1);
+        p.validate().unwrap();
+        assert_eq!(p.branch_count(),6);
+        let manifest=execute(&u,0,&p,&root.join("a")).unwrap();
+        execute(&u,0,&p,&root.join("b")).unwrap();
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);
+        // One uncertainty block with two swept values, each a low/central/high triple.
+        assert_eq!(manifest["uncertainty"]["format"],crate::research::FORMAT_UNCERTAINTY);
+        assert_eq!(manifest["uncertainty"]["method"],crate::research::METHOD_INPUT_BAND);
+        assert_eq!(manifest["uncertainty"]["parameter"],"moisture_airborne_fraction");
+        assert_eq!(manifest["uncertainty"]["relative_band"],0.1);
+        assert_eq!(manifest["uncertainty"]["evaluation"],"final_observation");
+        let entries=manifest["uncertainty"]["values"].as_array().unwrap();
+        assert_eq!(entries.len(),2);
+        assert_eq!(entries[0]["value"],0.2);
+        assert!((entries[0]["low_value"].as_f64().unwrap()-0.18).abs()<1e-12);
+        assert!((entries[0]["high_value"].as_f64().unwrap()-0.22).abs()<1e-12);
+        assert_eq!(entries[0]["runs"]["low"],0);
+        assert_eq!(entries[0]["runs"]["central"],1);
+        assert_eq!(entries[0]["runs"]["high"],2);
+        assert_eq!(entries[1]["value"],0.6);
+        // Band metadata beside every run, self-contained triple, exact replay.
+        for i in 0..6 {
+            let name=format!("run-{i:03}");
+            let band=crate::research::RunBand::read(&root.join("a").join(&name)).unwrap();
+            assert_eq!(band.parameter,Parameter::MoistureAirborneFraction);
+            assert_eq!(band.relative_band,0.1);
+            assert_eq!(band.role,match i%3 {0=>crate::research::BandRole::Low,1=>crate::research::BandRole::Central,_=>crate::research::BandRole::High});
+            assert_eq!(band.swept_value,p.values[i/3]);
+            assert!((band.value-p.values[i/3]*band.role.multiplier(0.1)).abs()<1e-12);
+            assert!(band.triple_final_metrics["vapor"]["at_central"].as_f64().is_some());
+            let other=crate::research::RunBand::read(&root.join("b").join(&name)).unwrap();
+            assert_eq!(band,other);
+            for file in ["samples.json","samples.csv","report.json"] {
+                assert_eq!(std::fs::read(root.join("a").join(&name).join(file)).unwrap(),std::fs::read(root.join("b").join(&name).join(file)).unwrap());
+            }
+        }
+        // The crew airborne moisture fraction actually moves retained vapor: the authored band is visible.
+        let vapor=|slot:&str|->f64 {
+            let b=crate::research::RunBand::read(&root.join("a").join("run-000")).unwrap();
+            b.triple_final_metrics["vapor"][slot].as_f64().unwrap()
+        };
+        assert!(
+            vapor("at_low") != vapor("at_high"),
+            "band left vapor unchanged: low {} central {} high {}",
+            vapor("at_low"), vapor("at_central"), vapor("at_high")
+        );
+        assert!(vapor("at_low").is_finite() && vapor("at_central").is_finite() && vapor("at_high").is_finite());
+        // Manifest uncertainty triples equal the per-run band metadata.
+        assert_eq!(manifest["uncertainty"]["values"][0]["metrics"]["vapor"]["at_low"],serde_json::json!(vapor("at_low")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn authored_band_refuses_paired_zero_out_of_range_and_legacy_plans_stay_byte_identical() {
+        let u=world();
+        let root=std::env::temp_dir().join(format!("cosmogon-sweep-band-refusal-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        let mut paired=Plan::linear(Parameter::FirmPowerW,1.,2.,2,2,60.).unwrap();
+        paired.secondary=Some(crate::habitat_factorial::Secondary{parameter:Parameter::WaterRecoveryFraction,values:[0.5,0.9]});
+        paired.authored_relative_band=Some(0.1);
+        assert!(paired.validate().is_err());
+        let mut zero=Plan::linear(Parameter::FirmPowerW,0.,1.,2,2,60.).unwrap();
+        zero.authored_relative_band=Some(0.1);
+        assert!(zero.validate().is_err());
+        for bad in [0.0,1.0,-0.1,1.5,f64::NAN] {
+            let mut p=Plan::linear(Parameter::FirmPowerW,1.,2.,2,2,60.).unwrap();
+            p.authored_relative_band=Some(bad);
+            assert!(p.validate().is_err());
+        }
+        // An out-of-domain band endpoint refuses the whole plan before any output folder exists.
+        let mut frac=Plan::linear(Parameter::WaterRecoveryFraction,0.5,0.9,2,2,60.).unwrap();
+        frac.authored_relative_band=Some(0.9);
+        assert!(execute(&u,0,&frac,&root.join("f")).is_err());
+        assert!(!root.join("f").exists());
+        // Legacy plans (no band) serialize byte-identically and run the original single branch per value.
+        let legacy=Plan::linear(Parameter::FirmPowerW,0.,1.,2,2,60.).unwrap();
+        let legacy_text=serde_json::to_string(&legacy).unwrap();
+        assert!(!legacy_text.contains("authored_relative_band"));
+        let mut reopened:Plan=serde_json::from_str(&legacy_text).unwrap();
+        assert_eq!(reopened.authored_relative_band,None);
+        reopened.authored_relative_band=Some(0.1);
+        assert!(serde_json::to_string(&reopened).unwrap().contains("authored_relative_band"));
+        assert_eq!(legacy.branch_count(),2);
+        let manifest=execute(&u,0,&legacy,&root.join("l")).unwrap();
+        assert!(manifest.get("uncertainty").is_none());
+        for i in 0..2 {
+            assert!(!root.join("l").join(format!("run-{i:03}")).join("band.json").exists());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    fn radiation_world() -> Universe {
+        let mut u=world();
+        let mut c=u.habitats[0].config.clone();
+        c.radiation=Some(crate::habitat_radiation::Config::default());
+        u.apply_edit(Edit::ConfigureHabitat{system:0,id:0,config:Box::new(c)}).unwrap();
+        u
+    }
+    #[test]
+    fn radiation_shielding_transmissions_sweep_and_bands_close_the_dose_envelope() {
+        let u=radiation_world();
+        let before=crate::research::state_fingerprint(&u).unwrap();
+        let root=std::env::temp_dir().join(format!("cosmogon-radiation-sweep-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        // Unconfigured radiation refuses before output.
+        let plain=world();
+        let mut need=Plan::linear(Parameter::RadiationWallTransmission,0.2,0.8,2,2,60.).unwrap();
+        need.authored_relative_band=Some(0.1);
+        assert!(execute(&plain,0,&need,&root.join("need")).is_err());
+        assert!(!root.join("need").exists());
+        // Wall transmission sweep with a band: exterior is fixed, interior scales linearly.
+        let mut p=Plan::linear(Parameter::RadiationWallTransmission,0.4,0.6,2,3,3600.).unwrap();
+        p.authored_relative_band=Some(0.1);
+        let manifest=execute(&u,0,&p,&root.join("a")).unwrap();
+        execute(&u,0,&p,&root.join("b")).unwrap();
+        assert_eq!(crate::research::state_fingerprint(&u).unwrap(),before);
+        assert_eq!(manifest["uncertainty"]["parameter"],"radiation_wall_transmission");
+        let band=crate::research::RunBand::read(&root.join("a").join("run-000")).unwrap();
+        let e=band.triple_final_metrics["radiation_exterior_dose_rate"]["at_central"].as_f64().unwrap();
+        let interior=|slot:&str|->f64 {
+            band.triple_final_metrics["radiation_interior_dose_rate"][slot].as_f64().unwrap()
+        };
+        assert!((interior("at_low")-e*0.36).abs()<1e-9);
+        assert!((interior("at_central")-e*0.4).abs()<1e-9);
+        assert!((interior("at_high")-e*0.44).abs()<1e-9);
+        // Shelter transmission sweep: interior fixed by wall, shelter scales.
+        let shelter=Plan::linear(Parameter::RadiationStormShelterTransmission,0.2,0.4,2,2,60.).unwrap();
+        let manifest=execute(&u,0,&shelter,&root.join("s")).unwrap();
+        assert!(manifest.get("uncertainty").is_none());
+        let band=crate::research::RunBand::read_optional(&root.join("s").join("run-000")).unwrap();
+        assert!(band.is_none());
+        let m=manifest["runs"][0]["final_metrics"]["radiation_shelter_dose_rate"]["value"].as_f64().unwrap();
+        assert!(m.is_finite());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

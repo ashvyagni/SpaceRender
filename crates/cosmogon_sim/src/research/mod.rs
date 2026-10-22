@@ -5,6 +5,7 @@ mod parameters;
 mod recording;
 mod registry;
 mod table;
+mod uncertainty;
 mod validation;
 
 pub use definition::*;
@@ -12,4 +13,5 @@ pub use parameters::*;
 pub use recording::*;
 pub use registry::*;
 pub use table::*;
+pub use uncertainty::*;
 pub use validation::*;

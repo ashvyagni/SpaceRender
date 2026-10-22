@@ -342,6 +342,7 @@ mod tests {
                 parameter: Parameter::HeatCapacityJK,
                 values: [1e8, 1e9],
             }),
+            authored_relative_band: None,
         };
         let mut recordings = vec![b.clone(), a.clone(), b, a];
         let report = factorial::report(&plan, &recordings).unwrap();
