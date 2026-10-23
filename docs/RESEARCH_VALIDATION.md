@@ -51,7 +51,12 @@ simulation seconds without a panic; signature and DMG checksum verification pass
 experiment bundles are retained locally under ignored dist/research-validation; source validation
 notes remain in version control. Review export limitations in [RESEARCH](RESEARCH.md).
 
-Measured analytic/JPL benchmark reports are the next connected slice, with independent scientific
-validation, covariance propagation and wider regime coverage still open acceptance work.
+The measured analytic/JPL benchmark reports landed as the build-59 cross-check extension: the
+report now covers six cases (circular and elliptical two-body fixtures at 1000/2000 steps, an
+RK4-vs-Yoshida integrator cross-check, and the JPL Horizons case at 181-day mid-year plus 365-day
+endpoints) with 21 JPL metrics and historical acceptance guards. Independent physical/model
+uncertainty, covariance propagation and wider regime coverage remain open acceptance work; the
+build-59 guards bound solver error only. Details and measured values are in
+[SCIENTIFIC_VALIDATION](SCIENTIFIC_VALIDATION.md), section “Build 59 cross-check extensions”.
 
-The subsequent measured-validation/cross-object slice is documented in [SCIENTIFIC_VALIDATION](SCIENTIFIC_VALIDATION.md); the 208-test count above remains the historical first research checkpoint.
+The subsequent measured-validation/cross-object slice is documented in [SCIENTIFIC_VALIDATION](SCIENTIFIC_VALIDATION.md); the 208-test count above remains the historical first research checkpoint. Build 59 verification stands at 684 release tests plus one existing ignored, zero failures and no new clippy warnings, with the golden fingerprint unchanged.
