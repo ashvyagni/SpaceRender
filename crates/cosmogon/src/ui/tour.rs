@@ -23,6 +23,9 @@ pub struct TourStep {
     pub speed: Option<usize>,
     /// Open the inspector on the focused object.
     pub select: bool,
+    /// Also open the research panel on this tab (0 Controls, 1 Models, 2 Data,
+    /// 3 Plots & Export, 4 Experiments) when the step is applied.
+    pub open_research: Option<usize>,
 }
 
 pub struct Tour {
@@ -35,7 +38,13 @@ pub struct Tour {
 }
 
 const fn step(title: &'static str, body: &'static str, focus: Option<&'static str>, distance: Option<f64>, speed: Option<usize>, select: bool) -> TourStep {
-    TourStep { title, body, focus, distance, speed, select }
+    TourStep { title, body, focus, distance, speed, select, open_research: None }
+}
+
+/// Like [`step`], but the step also opens the research panel on `open_research`
+/// (the tab indices used by the panel's tab bar).
+const fn step_with_research(title: &'static str, body: &'static str, focus: Option<&'static str>, distance: Option<f64>, speed: Option<usize>, select: bool, open_research: usize) -> TourStep {
+    TourStep { title, body, focus, distance, speed, select, open_research: Some(open_research) }
 }
 
 pub const TOURS: &[Tour] = &[
@@ -95,6 +104,20 @@ pub const TOURS: &[Tour] = &[
             step("Your turn", "Throw a comet of your own from the shelf in the dock — any icy body warmed by a star grows tails.", None, None, None, false),
         ],
     },
+    Tour {
+        id: "data_provenance",
+        title: "From data to provenance",
+        blurb: "Where every number on screen comes from: measured, derived, modelled or procedural — and how to check it. Two minutes.",
+        what_if: None,
+        steps: &[
+            step_with_research("Every number has a source", "The control panel that just opened lists this object's parameters. Each value carries a provenance badge: where the number came from, not just what it is. Search the list to jump to any parameter.", Some("Sun"), None, Some(0), true, 0),
+            step_with_research("Measured vs modelled", "MEASURED means an instrument recorded it — planet positions from JPL Horizons. MODELLED and ESTIMATED are our best physics given those measurements. PROCEDURAL fills in what no telescope resolves: surface craters, city lights.", Some("Earth"), Some(3.2), None, true, 2),
+            step_with_research("Sources and limits", "The Data tab names each dataset, its version and its limitations — what it can and cannot tell you. Embedded dataset versions show exactly which tables this universe was built from.", Some("Sun"), None, None, true, 2),
+            step_with_research("Take the numbers with you", "Plots & Export records any parameter over time and writes a CSV — every row keeps its provenance state, so an exported measurement stays distinguishable from a modelled one.", Some("Earth"), Some(4.0), None, true, 3),
+            step_with_research("Frozen experiments", "The Experiments tab turns a state into a portable definition: same starting point, same parameters, re-runnable later. State fingerprints detect when a future build would diverge.", Some("Sun"), None, None, true, 4),
+            step("Your turn", "Edit any parameter in Controls — it turns USER MODIFIED and stays marked until you reset. Check Info for the inputs behind a derived value, then export your own CSV.", Some("Earth"), Some(3.2), None, true),
+        ],
+    },
 ];
 
 /// The tour being shown.
@@ -111,7 +134,7 @@ pub fn tour_by_id(id: &str) -> Option<usize> {
 }
 
 /// Apply the current step's moves once, and draw the card.
-pub fn tour_card(mut commands: Commands, mut contexts: EguiContexts, tour: Option<ResMut<ActiveTour>>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, ui_state: Res<UiState>) -> Result {
+pub fn tour_card(mut commands: Commands, mut contexts: EguiContexts, tour: Option<ResMut<ActiveTour>>, mut sim: ResMut<Sim>, mut rig: ResMut<CameraRig>, mut ui_state: ResMut<UiState>) -> Result {
     let Some(mut tour) = tour else { return Ok(()) };
     let t = &TOURS[tour.tour];
     let n = t.steps.len();
@@ -132,6 +155,9 @@ pub fn tour_card(mut commands: Commands, mut contexts: EguiContexts, tour: Optio
             sim.speed = v.min(cosmogon_sim::time::SPEEDS.len() - 1);
             sim.paused = false;
         }
+        if let Some(tab) = s.open_research {
+            ui_state.research_requested = Some(tab);
+        }
     }
     if ui_state.hidden {
         return Ok(());
@@ -139,8 +165,11 @@ pub fn tour_card(mut commands: Commands, mut contexts: EguiContexts, tour: Optio
     let ctx = contexts.ctx_mut()?;
     let mut close = false;
     // Bottom-left of the free 3D view (between the side panels), clear of the tool dock.
+    // Steps that open the research window anchor top-left instead, and the whole card sits on
+    // the Foreground layer (like the tool dock) so the window can never cover it.
     let free = ctx.available_rect();
-    egui::Area::new(egui::Id::new("tour")).pivot(egui::Align2::LEFT_BOTTOM).fixed_pos(egui::pos2(free.left() + 16.0, free.bottom() - 120.0)).show(ctx, |ui| {
+    let (pivot, pos) = if s.open_research.is_some() { (egui::Align2::LEFT_TOP, egui::pos2(free.left() + 16.0, free.top() + 16.0)) } else { (egui::Align2::LEFT_BOTTOM, egui::pos2(free.left() + 16.0, free.bottom() - 120.0)) };
+    egui::Area::new(egui::Id::new("tour")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::new()
             .fill(PANEL.gamma_multiply(0.97))
             .stroke(egui::Stroke::new(1.0_f32, ACCENT_DIM))
@@ -209,6 +238,9 @@ mod tests {
             for s in t.steps {
                 if let Some(v) = s.speed {
                     assert!(v < cosmogon_sim::time::SPEEDS.len(), "{}: speed {v}", t.id);
+                }
+                if let Some(tab) = s.open_research {
+                    assert!(tab < 5, "{}: research tab {tab} out of range", t.id);
                 }
             }
         }

@@ -106,7 +106,7 @@ Released baselines: v0.3.0, v0.5.0, **v1.0.0** (`0411e9d`) — all preserved; ta
 | --- | --- | --- |
 | 58 | ~~Uncertainty and controlled-comparison framework across research panes~~ | ✅ **DONE** |
 | 59 | ~~Independent scientific validation campaign (analytic/JPL cross-checks extended)~~ | ✅ **DONE** |
-| 60 | Student→researcher UX completeness (guided flows, provenance surfacing) | ⬜ |
+| 60 | ~~Student→researcher UX completeness (guided flows, provenance surfacing)~~ | ✅ **DONE** |
 
 ### D. Consequences, history & civilizations — provisional, ~5 builds
 

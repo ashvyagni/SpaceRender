@@ -27,6 +27,35 @@ fn badge(ui: &mut egui::Ui, state: DataState) {
             .strong(),
     );
 }
+/// The eight provenance states, each with a one-line meaning, so a value's
+/// badge on any row is self-explanatory without prior context.
+fn provenance_legend(ui: &mut egui::Ui) {
+    ui.label(
+        egui::RichText::new("Provenance legend")
+            .small()
+            .strong()
+            .color(ACCENT),
+    );
+    egui::Grid::new("provenance_legend")
+        .num_columns(2)
+        .spacing([16.0, 2.0])
+        .show(ui, |ui| {
+            for (state, desc) in [
+                (DataState::Measured, "recorded by an instrument or observation"),
+                (DataState::Derived, "computed exactly from measured inputs"),
+                (DataState::Estimated, "inferred where the evidence is incomplete"),
+                (DataState::Modelled, "produced by the physics model"),
+                (DataState::MlInference, "from a trained model (current models produce none)"),
+                (DataState::Procedural, "generated to fill what no data resolves"),
+                (DataState::UserModified, "edited by you in this session"),
+                (DataState::Unknown, "provenance not recorded"),
+            ] {
+                badge(ui, state);
+                ui.label(egui::RichText::new(desc).small().color(MUTED));
+                ui.end_row();
+            }
+        });
+}
 fn quantity(id: ParameterId) -> (Quantity, usize) {
     use ParameterId::*;
     match id {
@@ -72,6 +101,7 @@ fn control(
         );
     }
     ui.label(egui::RichText::new("Edits are undoable. Derived values stay locked and update from their inputs. ‘Reset’ restores this selection's snapshot.").small().color(MUTED));
+    provenance_legend(ui);
     ui.checkbox(&mut workspace.choices.favorite_only, "Favorites only");
     let query = research.query.trim().to_lowercase();
     let mut pending = None;
@@ -379,6 +409,7 @@ fn validation(ui: &mut egui::Ui, research: &mut Research) {
 fn sources(ui: &mut egui::Ui, sim: &Sim, target: ResearchTarget) {
     ui.label(egui::RichText::new("Scientific data and source context").strong());
     ui.label(egui::RichText::new("Measured, derived, estimated, modelled, ML inference, procedural, user modified and unknown are distinct states. No ML inference is produced by the current models.").small().color(MUTED));
+    provenance_legend(ui);
     ui.add_space(8.0);
     egui::CollapsingHeader::new("Selected object's value states")
         .default_open(true)
